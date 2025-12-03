@@ -1,0 +1,228 @@
+/* NEW STYLES FOR RIGHTMOVE-STYLE CARDS */
+
+/* Property Image Section Redesign */
+.property-image-section {
+    position: relative;
+    background: #f5f5f5;
+    aspect-ratio: 4/3;
+    overflow: hidden;
+}
+
+.image-slider-wrapper {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+.image-slides {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+.image-slide {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    transition: opacity 0.5s ease;
+}
+
+.image-slide.active {
+    opacity: 1;
+}
+
+.image-slide img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.nav-arrow {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(255, 255, 255, 0.9);
+    border: none;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    font-size: 24px;
+    color: #333;
+    cursor: pointer;
+    z-index: 10;
+    opacity: 0;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-center;
+}
+
+.property-card:hover .nav-arrow {
+    opacity: 1;
+}
+
+.nav-arrow:hover {
+    background: rgba(255, 255, 255, 1);
+    transform: translateY(-50%) scale(1.1);
+}
+
+.nav-arrow.left {
+    left: 12px;
+}
+
+.nav-arrow.right {
+    right: 12px;
+}
+
+/* Property Info Section */
+.property-info-section {
+    padding: 1.25rem;
+    background: white;
+}
+
+.property-address-title {
+    font-size: 0.95rem;
+    font-weight: 400;
+    color: #333;
+    margin: 0 0 0.75rem 0;
+    line-height: 1.5;
+}
+
+.property-price-section {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.price-amount {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #333;
+}
+
+.info-icon {
+    font-size: 1.125rem;
+    color: #999;
+    cursor: help;
+}
+
+.reduced-date {
+    font-size: 0.875rem;
+    color: #d93025;
+    margin-bottom: 1rem;
+}
+
+/* Property Details Grid - Matches Screenshot Exactly */
+.property-details-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+    padding: 1rem 0;
+    border-top: 1px solid #e0e0e0;
+    border-bottom: 1px solid #e0e0e0;
+    margin-bottom: 1rem;
+}
+
+.detail-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+}
+
+.detail-label {
+    font-size: 0.6875rem;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+}
+
+.detail-value {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    color: #333;
+    font-weight: 500;
+}
+
+.detail-icon {
+    width: 18px;
+    height: 18px;
+    color: #666;
+}
+
+/* Loading Skeleton State */
+.detail-item.skeleton .detail-value {
+    color: #999;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Action Buttons (Share & Favorite) */
+.action-buttons {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+}
+
+.share-btn,
+.favorite-btn {
+    background: none;
+    border: 1px solid #e0e0e0;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: #333;
+}
+
+.share-btn:hover,
+.favorite-btn:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.favorite-btn.active {
+    background: #ff4458;
+    border-color: #ff4458;
+    color: white;
+}
+
+/* Loading State for Cards  */
+.property-card.loading {
+    opacity: 0.7;
+}
+
+/* Grid Responsive - 3 per row */
+.properties-grid {
+    grid-template-columns: repeat(3, 1fr);
+}
+
+@media (max-width: 1200px) {
+    .properties-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 768px) {
+    .properties-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .property-details-grid {
+        grid-template-columns: 1fr;
+    }
+}

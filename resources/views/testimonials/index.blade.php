@@ -236,8 +236,13 @@
 <body>
     <div class="testimonials-container">
         <div class="section-title">
-            <h1><i class="fas fa-comments"></i> Client Testimonials</h1>
-            <p>What our valued clients say about us</p>
+            <h1><i class="fas fa-comments"></i>Web techfusion Scraping</h1>
+            
+            <div style="text-align: left; margin-top: 20px;">
+                <button id="syncBtn" class="btn btn-primary" onclick="syncTestimonials()">
+                    <i class="fas fa-sync-alt"></i> Sync Testimonials
+                </button>
+            </div>
         </div>
 
         <div id="testimonials-content">
@@ -253,10 +258,80 @@
         let currentTestimonialIndex = 0;
         let testimonialsData = [];
 
-        // Fetch and display testimonials
+        // Sync testimonials from source website
+        async function syncTestimonials() {
+            const syncBtn = document.getElementById('syncBtn');
+            const originalText = syncBtn.innerHTML;
+            
+            try {
+                // Show loading state
+                syncBtn.disabled = true;
+                syncBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Syncing...';
+                
+                const response = await fetch('{{ url("/sync-testimonials") }}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Check if any updates were found
+                    if (data.updated === false) {
+                        // No new updates
+                        syncBtn.innerHTML = '<i class="fas fa-info-circle"></i> No Updates Found';
+                        syncBtn.classList.remove('btn-primary');
+                        syncBtn.classList.add('btn-info');
+                        
+                        // Reset button after 2 seconds
+                        setTimeout(() => {
+                            syncBtn.innerHTML = originalText;
+                            syncBtn.classList.remove('btn-info');
+                            syncBtn.classList.add('btn-primary');
+                            syncBtn.disabled = false;
+                        }, 2000);
+                    } else {
+                        // Show success message
+                        syncBtn.innerHTML = '<i class="fas fa-check"></i> Synced Successfully!';
+                        syncBtn.classList.remove('btn-primary');
+                        syncBtn.classList.add('btn-success');
+                        
+                        // Reload testimonials
+                        await loadTestimonials();
+                        
+                        // Reset button after 2 seconds
+                        setTimeout(() => {
+                            syncBtn.innerHTML = originalText;
+                            syncBtn.classList.remove('btn-success');
+                            syncBtn.classList.add('btn-primary');
+                            syncBtn.disabled = false;
+                        }, 2000);
+                    }
+                } else {
+                    throw new Error(data.error || 'Sync failed');
+                }
+            } catch (error) {
+                console.error('Error syncing testimonials:', error);
+                syncBtn.innerHTML = '<i class="fas fa-times"></i> Sync Failed';
+                syncBtn.classList.remove('btn-primary');
+                syncBtn.classList.add('btn-danger');
+                
+                setTimeout(() => {
+                    syncBtn.innerHTML = originalText;
+                    syncBtn.classList.remove('btn-danger');
+                    syncBtn.classList.add('btn-primary');
+                    syncBtn.disabled = false;
+                }, 2000);
+            }
+        }
+
+        // Fetch and display testimonials from database
         async function loadTestimonials() {
             try {
-                const response = await fetch('{{ url("/scrape-testimonials") }}');
+                const response = await fetch('{{ url("/api/testimonials") }}');
                 const data = await response.json();
                 
                 const contentDiv = document.getElementById('testimonials-content');
