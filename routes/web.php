@@ -42,5 +42,12 @@ Route::get('/api/internal-property/fetch-urls-paginated', [InternalPropertyContr
 Route::post('/api/internal-property/fetch-all', [InternalPropertyController::class, 'fetchAllProperties'])->name('internal-property.fetch-all');
 Route::post('/api/internal-property/sync', [InternalPropertyController::class, 'sync'])->name('internal-property.sync');
 
+// Saved Search routes
+Route::get('/searchproperties', [App\Http\Controllers\SavedSearchController::class, 'showPage'])->name('searchproperties.index');
+Route::get('/api/saved-searches', [App\Http\Controllers\SavedSearchController::class, 'index']);
+Route::post('/api/saved-searches', [App\Http\Controllers\SavedSearchController::class, 'store']);
+Route::put('/api/saved-searches/{id}', [App\Http\Controllers\SavedSearchController::class, 'update']);
+Route::delete('/api/saved-searches/{id}', [App\Http\Controllers\SavedSearchController::class, 'destroy']);
+
 // Auth routes
 require __DIR__.'/auth.php';
