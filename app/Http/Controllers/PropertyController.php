@@ -54,11 +54,26 @@ class PropertyController extends Controller
         }
     }
 
-    public function sync()
+    public function sync(Request $request = null)
     {
         // Increase execution time for this endpoint
         set_time_limit(300); // 5 minutes
         
+        $baseUrl = 'https://www.rightmove.co.uk/property-for-sale/find.html?searchLocation=Bath%2C+Somerset&useLocationIdentifier=true&locationIdentifier=REGION%5E116&radius=0.0&_includeSSTC=on';
+        
+        // If request is provided and has url, use it
+        if ($request && $request->has('url')) {
+            $baseUrl = $request->input('url');
+        }
+
+        return $this->scrapeProperties($baseUrl);
+    }
+
+    /**
+     * Reusable method to scrape properties from a given Rightmove URL
+     */
+    public function scrapeProperties($baseUrl) 
+    {
         try {
             $client = new Client([
                 'verify' => false,
@@ -73,7 +88,6 @@ class PropertyController extends Controller
             ]);
             
             $allUrls = [];
-            $baseUrl = 'https://www.rightmove.co.uk/property-for-sale/find.html?searchLocation=Bath%2C+Somerset&useLocationIdentifier=true&locationIdentifier=REGION%5E116&radius=0.0&_includeSSTC=on';
             
             // Scrape multiple pages until no more properties are found
             $maxPages = 50; // Increased to ensure we get all properties
@@ -88,7 +102,9 @@ class PropertyController extends Controller
                 while ($retryCount < $maxRetries && !$pageSuccess) {
                     try {
                         $index = $page * 24;
-                        $url = $page === 0 ? $baseUrl : $baseUrl . '&index=' . $index;
+                        // Append index to URL correctly (check if query string exists)
+                        $separator = (strpos($baseUrl, '?') !== false) ? '&' : '?';
+                        $url = $page === 0 ? $baseUrl : $baseUrl . $separator . 'index=' . $index;
                         
                         \Log::info("Fetching page: " . ($page + 1) . " (Attempt " . ($retryCount + 1) . ") - URL: " . $url);
                         

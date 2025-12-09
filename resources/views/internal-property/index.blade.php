@@ -4,7 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Browse retirement properties from Rightmove">
-    <title>Internal Properties - Property Listings</title>
+    <title>
+        @if(isset($search))
+            {{ str_replace('+', ' ', urldecode($search->area)) }} - Property Details
+        @else
+            Internal Properties - Property Listings
+        @endif
+    </title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         * {
@@ -651,7 +657,13 @@
     <div class="container">
         <!-- Header -->
         <div class="header">
-            <h1 class="title">Internal Properties</h1>
+            <h1 class="title">
+                @if(isset($search))
+                    Properties in {{ str_replace('+', ' ', urldecode($search->area)) }}
+                @else
+                    Internal Properties
+                @endif
+            </h1>
             <button class="sync-btn" id="syncBtn">
                 <svg class="sync-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
@@ -694,6 +706,9 @@
     </div>
 
     <script>
+        window.searchContext = @json($search ?? null);
+    </script>
+    <script>
         // State
         let currentSlide = 0;
         let propertyData = null;
@@ -735,7 +750,11 @@
                 // Fetch all property URLs (instant if cached)
                 showAlert('success', 'Loading property URLs...');
                 
-                const urlsResponse = await fetch('/api/internal-property/fetch-urls');
+                const url = window.searchContext 
+                    ? `/api/internal-property/fetch-urls?search_id=${window.searchContext.id}` 
+                    : '/api/internal-property/fetch-urls';
+                
+                const urlsResponse = await fetch(url);
                 
                 if (!urlsResponse.ok) {
                     throw new Error(`HTTP error! status: ${urlsResponse.status}`);

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Services\InternalPropertyService;
+use App\Models\SavedSearch;
 use Illuminate\Support\Facades\Log;
 
 class InternalPropertyController extends Controller
@@ -22,7 +23,16 @@ class InternalPropertyController extends Controller
      */
     public function index()
     {
-        return view('internal-property.index');
+        return view('internal-property.index', ['search' => null]);
+    }
+
+    /**
+     * Display internal properties for a specific saved search
+     */
+    public function show($id)
+    {
+        $search = SavedSearch::findOrFail($id);
+        return view('internal-property.index', ['search' => $search]);
     }
 
     /**
@@ -130,11 +140,15 @@ class InternalPropertyController extends Controller
      * 
      * @return \Illuminate\Http\JsonResponse
      */
-    public function fetchUrls()
+    public function fetchUrls(Request $request)
     {
         try {
+            $searchId = $request->input('search_id');
+            
+            // Generate cache key based on search context
+            $cacheKey = $searchId ? "property_urls_search_{$searchId}" : 'property_urls_list';
+            
             // Check cache first (30 minutes TTL)
-            $cacheKey = 'property_urls_list';
             $cached = \Cache::get($cacheKey);
             
             if ($cached && isset($cached['urls']) && count($cached['urls']) > 0) {
@@ -155,7 +169,19 @@ class InternalPropertyController extends Controller
             set_time_limit(600); // 10 minutes
             
             $propertyController = new \App\Http\Controllers\PropertyController();
-            $response = $propertyController->sync();
+            
+            if ($searchId) {
+                $search = SavedSearch::find($searchId);
+                if ($search && $search->updates_url) {
+                    Log::info("Fetching URLs for Saved Search #{$searchId}: {$search->updates_url}");
+                    $response = $propertyController->scrapeProperties($search->updates_url);
+                } else {
+                    // Fallback if search not found or no URL
+                    $response = $propertyController->sync();
+                }
+            } else {
+                $response = $propertyController->sync();
+            }
             
             // Get the JSON data from the response
             $data = $response->getData(true);

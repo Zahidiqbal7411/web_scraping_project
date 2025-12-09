@@ -473,100 +473,13 @@
                     <!-- Hidden field for editing -->
                     <input type="hidden" id="editSearchId" value="">
                     
-                    <!-- Row 1: Area Selection -->
+                    <!-- Row 1: Area Input with Check Button -->
             <div class="form-row">
                 <div class="form-group" style="grid-column: span 2;">
-                    <label class="form-label">Select Area / Region</label>
-                    <select id="areaSelect" class="form-control">
-                        <option value="">-- Select an Area --</option>
-                        
-                        <!-- South West -->
-                        <optgroup label="South West">
-                            <option value="REGION^116" data-name="Bath, Somerset">Bath, Somerset</option>
-                            <option value="REGION^219" data-name="Bristol">Bristol</option>
-                            <option value="REGION^353" data-name="Cheltenham">Cheltenham</option>
-                            <option value="REGION^517" data-name="Exeter">Exeter</option>
-                            <option value="REGION^665" data-name="Gloucester">Gloucester</option>
-                            <option value="REGION^1092" data-name="Plymouth">Plymouth</option>
-                            <option value="REGION^1261" data-name="Swindon">Swindon</option>
-                            <option value="REGION^1284" data-name="Taunton">Taunton</option>
-                            <option value="REGION^24568" data-name="Cornwall">Cornwall</option>
-                        </optgroup>
-                        
-                        <!-- South East -->
-                        <optgroup label="South East">
-                            <option value="REGION^93965" data-name="London">London</option>
-                            <option value="REGION^219" data-name="Brighton">Brighton</option>
-                            <option value="REGION^274" data-name="Canterbury">Canterbury</option>
-                            <option value="REGION^1051" data-name="Oxford">Oxford</option>
-                            <option value="REGION^1140" data-name="Reading">Reading</option>
-                            <option value="REGION^1234" data-name="Southampton">Southampton</option>
-                            <option value="REGION^1108" data-name="Portsmouth">Portsmouth</option>
-                            <option value="REGION^928" data-name="Milton Keynes">Milton Keynes</option>
-                        </optgroup>
-                        
-                        <!-- Midlands -->
-                        <optgroup label="Midlands">
-                            <option value="REGION^162" data-name="Birmingham">Birmingham</option>
-                            <option value="REGION^430" data-name="Coventry">Coventry</option>
-                            <option value="REGION^453" data-name="Derby">Derby</option>
-                            <option value="REGION^806" data-name="Leicester">Leicester</option>
-                            <option value="REGION^981" data-name="Nottingham">Nottingham</option>
-                            <option value="REGION^1255" data-name="Stoke-on-Trent">Stoke-on-Trent</option>
-                            <option value="REGION^1398" data-name="Worcester">Worcester</option>
-                        </optgroup>
-                        
-                        <!-- North West -->
-                        <optgroup label="North West">
-                            <option value="REGION^886" data-name="Manchester">Manchester</option>
-                            <option value="REGION^835" data-name="Liverpool">Liverpool</option>
-                            <option value="REGION^351" data-name="Chester">Chester</option>
-                            <option value="REGION^1113" data-name="Preston">Preston</option>
-                            <option value="REGION^171" data-name="Blackpool">Blackpool</option>
-                            <option value="REGION^288" data-name="Carlisle">Carlisle</option>
-                        </optgroup>
-                        
-                        <!-- North East & Yorkshire -->
-                        <optgroup label="North East & Yorkshire">
-                            <option value="REGION^802" data-name="Leeds">Leeds</option>
-                            <option value="REGION^1190" data-name="Sheffield">Sheffield</option>
-                            <option value="REGION^910" data-name="Newcastle upon Tyne">Newcastle upon Tyne</option>
-                            <option value="REGION^1425" data-name="York">York</option>
-                            <option value="REGION^755" data-name="Hull">Hull</option>
-                            <option value="REGION^2828" data-name="Durham">Durham</option>
-                            <option value="REGION^194" data-name="Bradford">Bradford</option>
-                        </optgroup>
-                        
-                        <!-- East of England -->
-                        <optgroup label="East of England">
-                            <option value="REGION^265" data-name="Cambridge">Cambridge</option>
-                            <option value="REGION^983" data-name="Norwich">Norwich</option>
-                            <option value="REGION^1080" data-name="Peterborough">Peterborough</option>
-                            <option value="REGION^768" data-name="Ipswich">Ipswich</option>
-                            <option value="REGION^847" data-name="Luton">Luton</option>
-                        </optgroup>
-                        
-                        <!-- Wales -->
-                        <optgroup label="Wales">
-                            <option value="REGION^277" data-name="Cardiff">Cardiff</option>
-                            <option value="REGION^1268" data-name="Swansea">Swansea</option>
-                            <option value="REGION^962" data-name="Newport">Newport</option>
-                        </optgroup>
-                        
-                        <!-- Scotland -->
-                        <optgroup label="Scotland">
-                            <option value="REGION^550" data-name="Edinburgh">Edinburgh</option>
-                            <option value="REGION^664" data-name="Glasgow">Glasgow</option>
-                            <option value="REGION^18" data-name="Aberdeen">Aberdeen</option>
-                            <option value="REGION^548" data-name="Dundee">Dundee</option>
-                        </optgroup>
-                        
-                        <!-- Northern Ireland -->
-                        <optgroup label="Northern Ireland">
-                            <option value="REGION^143" data-name="Belfast">Belfast</option>
-                            <option value="REGION^457" data-name="Derry">Derry</option>
-                        </optgroup>
-                    </select>
+                    <label class="form-label">Enter Area / Region</label>
+                    <input type="text" id="areaInput" class="form-control" placeholder="Enter area name (e.g., London, Manchester, Birmingham)">
+                    <input type="hidden" id="areaIdentifier" value="">
+                    <input type="hidden" id="areaName" value="">
                 </div>
             </div>
 
@@ -814,6 +727,31 @@
                 </div>
             </div>
 
+            <!-- Generated URL Section -->
+            <div class="form-row" style="margin-top: 1.5rem;">
+                <div class="form-group" style="grid-column: span 2;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                        <label class="form-label" style="margin: 0;">Rightmove URL <span style="color: var(--error);">*</span></label>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <button type="button" id="generateUrlBtn" class="btn btn-teal btn-sm" style="padding: 0.4rem 0.75rem; font-size: 0.8rem;">
+                                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align: middle; margin-right: 0.25rem;">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
+                                </svg>
+                                Generate URL
+                            </button>
+                            <a id="visitUrlBtn" href="#" target="_blank" class="btn btn-primary btn-sm" style="padding: 0.4rem 0.75rem; font-size: 0.8rem; display: none; align-items: center;">
+                                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin-right: 0.25rem;">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                                </svg>
+                                Visit URL
+                            </a>
+                        </div>
+                    </div>
+                    <textarea id="generatedUrlInput" class="form-control" rows="3" placeholder="Click 'Generate URL' to create URL mostly or paste a URL manually..." style="font-family: monospace; font-size: 0.85rem; resize: vertical; min-height: 80px;"></textarea>
+                    <p style="margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-secondary);">You can edit the URL manually or generate it from your selected options above.</p>
+                </div>
+            </div>
+
             <!-- Form Actions -->
             <div class="form-actions">
                 <button type="button" class="btn" style="background: var(--text-secondary); color: white;" id="cancelModalBtn">Cancel</button>
@@ -945,7 +883,14 @@
         const editSearchId = document.getElementById('editSearchId');
 
         // Form Elements
-        const areaSelect = document.getElementById('areaSelect');
+        const areaInput = document.getElementById('areaInput');
+        const areaIdentifier = document.getElementById('areaIdentifier');
+        const areaName = document.getElementById('areaName');
+
+
+        const visitUrlBtn = document.getElementById('visitUrlBtn');
+        
+        // Restore missing element references
         const minPriceSelect = document.getElementById('minPrice');
         const maxPriceSelect = document.getElementById('maxPrice');
         const minBedroomsSelect = document.getElementById('minBedrooms');
@@ -955,8 +900,15 @@
         // Modal Open/Close
         openModalBtn.addEventListener('click', () => {
             resetForm();
+            // Enable inputs for adding
+            enableFormInputs();
             modalTitle.textContent = 'Create New Search';
             saveButtonText.textContent = 'Save Search';
+            // Show Save button, hide Visit button
+            saveSearchBtn.style.display = 'flex';
+            visitUrlBtn.style.display = 'none';
+            document.getElementById('generateUrlBtn').style.display = 'inline-flex';
+            
             editSearchId.value = '';
             searchModal.classList.add('active');
         });
@@ -971,15 +923,19 @@
         function closeModal() {
             searchModal.classList.remove('active');
             resetForm();
+            enableFormInputs(); // Reset to enabled state
         }
 
         function resetForm() {
-            areaSelect.value = '';
-            minPriceSelect.value = '';
-            maxPriceSelect.value = '';
-            minBedroomsSelect.value = '';
-            maxBedroomsSelect.value = '';
-            maxDaysSinceAddedSelect.value = '1';
+            areaInput.value = '';
+            areaIdentifier.value = '';
+            areaName.value = '';
+            // areaStatus removed
+            if(minPriceSelect) minPriceSelect.value = '';
+            if(maxPriceSelect) maxPriceSelect.value = '';
+            if(minBedroomsSelect) minBedroomsSelect.value = '';
+            if(maxBedroomsSelect) maxBedroomsSelect.value = '';
+            if(maxDaysSinceAddedSelect) maxDaysSinceAddedSelect.value = '1';
             
             // Reset bathrooms
             const minBathroomsSelect = document.getElementById('minBathrooms');
@@ -1007,6 +963,27 @@
                 cb.checked = false;
             });
             editSearchId.value = '';
+            
+            // Reset generated URL input
+            const generatedUrlInput = document.getElementById('generatedUrlInput');
+            if (generatedUrlInput) generatedUrlInput.value = '';
+        }
+
+        function enableFormInputs() {
+            const inputs = searchModal.querySelectorAll('input, select, textarea');
+            inputs.forEach(input => {
+                input.disabled = false;
+            });
+        }
+
+        function disableFormInputs() {
+            const inputs = searchModal.querySelectorAll('input, select, textarea');
+            inputs.forEach(input => {
+                // Keep close buttons enabled if they were inputs (though they are usually buttons)
+                if (input.type !== 'button') {
+                    input.disabled = true;
+                }
+            });
         }
 
         // Show Alert
@@ -1025,18 +1002,42 @@
             const baseUrl = 'https://www.rightmove.co.uk/property-for-sale/find.html';
             const params = new URLSearchParams();
 
+            // Use location identifier flag
+            params.append('useLocationIdentifier', 'true');
+
             // Location identifier (required for search to work)
-            const locationId = areaSelect.value;
+            const locationId = areaIdentifier.value;
             if (locationId) {
                 params.append('locationIdentifier', locationId);
             }
 
-            // Search location for display
-            const selectedOption = areaSelect.options[areaSelect.selectedIndex];
-            const locationName = selectedOption.dataset.name || '';
-            if (locationName) {
-                params.append('searchLocation', locationName);
+            // Search location name (for database storage)
+            const searchLocationName = areaName.value || areaInput.value.trim();
+            if (searchLocationName) {
+                params.append('searchLocation', searchLocationName);
             }
+
+            // Radius
+            params.append('radius', '0.0');
+
+            // Include SSTC checkbox state
+            const includeSSTC = document.getElementById('includeSSTC');
+            if (includeSSTC && includeSSTC.checked) {
+                params.append('_includeSSTC', 'on');
+            }
+
+            // Index for pagination
+            params.append('index', '0');
+
+            // Sorting - most recent
+            params.append('sortType', '2');
+
+            // Channel and transaction type
+            params.append('channel', 'BUY');
+            params.append('transactionType', 'BUY');
+
+            // Display location identifier
+            params.append('displayLocationIdentifier', 'undefined');
 
             // Price
             if (minPriceSelect.value) {
@@ -1054,6 +1055,13 @@
                 params.append('maxBedrooms', maxBedroomsSelect.value);
             }
 
+            // Property Types - comma-separated
+            const checkedTypes = document.querySelectorAll('input[name="propertyType"]:checked');
+            if (checkedTypes.length > 0) {
+                const types = Array.from(checkedTypes).map(cb => cb.value).join(',');
+                params.append('propertyTypes', types);
+            }
+
             // Bathrooms
             const minBathroomsSelect = document.getElementById('minBathrooms');
             const maxBathroomsSelect = document.getElementById('maxBathrooms');
@@ -1064,63 +1072,77 @@
                 params.append('maxBathrooms', maxBathroomsSelect.value);
             }
 
-            // Property Types
-            const checkedTypes = document.querySelectorAll('input[name="propertyType"]:checked');
-            if (checkedTypes.length > 0) {
-                const types = Array.from(checkedTypes).map(cb => cb.value).join(',');
-                params.append('propertyTypes', types);
-            }
-
-            // Include Under Offer / Sold STC
-            const includeSSTC = document.getElementById('includeSSTC');
-            if (includeSSTC && includeSSTC.checked) {
-                params.append('includeSSTC', 'true');
-            }
-
-            // Date Added
-            if (maxDaysSinceAddedSelect.value) {
-                params.append('maxDaysSinceAdded', maxDaysSinceAddedSelect.value);
-            }
-
-            // Tenure Types
+            // Tenure Types - comma-separated
             const checkedTenures = document.querySelectorAll('input[name="tenureType"]:checked');
             if (checkedTenures.length > 0) {
                 const tenures = Array.from(checkedTenures).map(cb => cb.value).join(',');
                 params.append('tenureTypes', tenures);
             }
 
-            // Must Haves
+            // Include Under Offer / Sold STC
+            if (includeSSTC && includeSSTC.checked) {
+                params.append('includeSSTC', 'true');
+            }
+
+            // Must Have features - comma-separated
             const checkedMustHaves = document.querySelectorAll('input[name="mustHave"]:checked');
             if (checkedMustHaves.length > 0) {
                 const mustHaves = Array.from(checkedMustHaves).map(cb => cb.value).join(',');
                 params.append('mustHave', mustHaves);
             }
 
-            // Don't Show
+            // Don't Show features - comma-separated
             const checkedDontShow = document.querySelectorAll('input[name="dontShow"]:checked');
             if (checkedDontShow.length > 0) {
                 const dontShows = Array.from(checkedDontShow).map(cb => cb.value).join(',');
                 params.append('dontShow', dontShows);
             }
 
-            // Sorting - most recent
-            params.append('sortType', '6');
-
-            // Radius
-            params.append('radius', '0.0');
-
-            // Index for pagination
-            params.append('index', '0');
+            // Date Added (removed from URL for cleaner format, can be added if needed)
+            // if (maxDaysSinceAddedSelect.value) {
+            //     params.append('maxDaysSinceAdded', maxDaysSinceAddedSelect.value);
+            // }
 
             return `${baseUrl}?${params.toString()}`;
         }
+
+        // Generate URL button handler
+        const generateUrlBtn = document.getElementById('generateUrlBtn');
+        const generatedUrlInput = document.getElementById('generatedUrlInput');
+        
+        generateUrlBtn.addEventListener('click', () => {
+            // No area validation needed now
+            
+            const url = buildRightmoveUrl();
+            generatedUrlInput.value = url;
+            showAlert('success', 'URL generated successfully! You can edit it before saving.');
+        });
 
         // Load Searches on Page Load
         document.addEventListener('DOMContentLoaded', loadSearches);
 
         // Save/Update Search
         saveSearchBtn.addEventListener('click', async () => {
-            const url = buildRightmoveUrl();
+            // Get URL from the editable input, or generate if empty
+            let url = generatedUrlInput.value.trim();
+            
+            // If no URL in the input, check if we can generate one
+            // If no URL in the input, check if we can generate one
+            // If no URL in the input, check if we can generate one
+            if (!url) {
+                if (!areaInput.value) {
+                     showAlert('error', 'Rightmove URL is mandatory. Please enter a URL or click "Generate URL".');
+                     return;
+                }
+                
+                // If we have an area, we can try to generate
+                // But since we removed check button, we don't have identifier usually
+                // However, user might expect auto-generate.
+                // Let's enforce manual generation click to be safe/clear
+                showAlert('error', 'Rightmove URL is mandatory. Please enter a URL or click "Generate URL".');
+                return;
+            }
+            
             const isEdit = editSearchId.value !== '';
 
             const originalContent = saveSearchBtn.innerHTML;
@@ -1137,7 +1159,10 @@
                         'Content-Type': 'application/json',
                         'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
                     },
-                    body: JSON.stringify({ updates_url: url })
+                    body: JSON.stringify({ 
+                        updates_url: url,
+                        area: areaInput.value.trim() // Send area explicitly
+                    })
                 });
 
                 const data = await response.json();
@@ -1200,14 +1225,15 @@
                                 <td class="text-muted">${minPrice} - ${maxPrice}</td>
                                 <td class="text-muted">${minBed} - ${maxBed} Beds</td>
                                 <td class="text-muted capitalize">
-                                    <button onclick="showPropertyTypes('${type.replace(/'/g, "\\'")}')" class="btn btn-sm" style="background: var(--teal); color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;">
-                                        View Types
-                                    </button>
+                                    <a href="/internal-properties/search/${search.id}" class="btn btn-sm" style="background: var(--primary); color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
+                                        <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                        Property Details
+                                    </a>
                                 </td>
                                 <td>
                                     <div class="actions">
                                         <button onclick="editSearch(${search.id})" class="btn btn-primary btn-sm">Edit</button>
-                                        <button onclick="showUrlPreview('${search.updates_url.replace(/'/g, "\\'")}', ${search.id})" class="btn btn-secondary btn-sm">View</button>
+                                        <button onclick="viewSearch(${search.id})" class="btn btn-secondary btn-sm">View</button>
                                         <button onclick="confirmDelete(${search.id}, '${area.replace(/'/g, "\\'")}')" class="btn btn-danger btn-sm">Delete</button>
                                     </div>
                                 </td>
@@ -1258,7 +1284,7 @@
         const urlEditContainer = document.getElementById('urlEditContainer');
         const urlEditTextarea = document.getElementById('urlEditTextarea');
         const urlPreviewSearchId = document.getElementById('urlPreviewSearchId');
-        const visitUrlBtn = document.getElementById('visitUrlBtn');
+
         const editUrlBtn = document.getElementById('editUrlBtn');
         const updateUrlBtn = document.getElementById('updateUrlBtn');
         const closeUrlPreviewModalBtn = document.getElementById('closeUrlPreviewModal');
@@ -1285,6 +1311,13 @@
             visitUrlBtn.href = url;
             urlPreviewSearchId.value = searchId || '';
             urlPreviewModal.classList.add('active');
+        };
+
+        // Show URL Preview from data attributes (safer for URLs with special characters)
+        window.showUrlPreviewFromData = (button) => {
+            const url = decodeURIComponent(button.dataset.url);
+            const searchId = button.dataset.id;
+            showUrlPreview(url, searchId);
         };
 
         // Edit URL Button
@@ -1359,10 +1392,13 @@
                 const urlObj = new URL(search.updates_url);
                 const params = new URLSearchParams(urlObj.search);
 
-                // Set area by locationIdentifier
+                // Set area by locationIdentifier and searchLocation
                 const locationId = params.get('locationIdentifier') || '';
+                const searchLocation = params.get('searchLocation') || '';
                 if (locationId) {
-                    areaSelect.value = locationId;
+                    areaIdentifier.value = locationId;
+                    areaName.value = searchLocation;
+                    areaInput.value = searchLocation;
                 }
 
                 // Set prices
@@ -1418,6 +1454,46 @@
                 console.error('Error parsing URL:', e);
             }
 
+            // Populate the generated URL input with the existing URL
+            const generatedUrlInput = document.getElementById('generatedUrlInput');
+            if (generatedUrlInput) {
+                generatedUrlInput.value = search.updates_url;
+            }
+
+            searchModal.classList.add('active');
+        };
+
+        // View Search - populate form in read-only mode
+        window.viewSearch = (id) => {
+            const search = window.savedSearchesData[id];
+            if (!search) {
+                showAlert('error', 'Search data not found');
+                return;
+            }
+
+            // Reuse logic to populate form
+            window.editSearch(id);
+
+            // Override title and buttons
+            modalTitle.textContent = 'View Search';
+            
+            // Disable all inputs
+            disableFormInputs();
+            
+            // Hide Save button
+            saveSearchBtn.style.display = 'none';
+            // Hide Generate URL button
+            document.getElementById('generateUrlBtn').style.display = 'none';
+            
+            // Show Visit URL button
+            if (search.updates_url) {
+                visitUrlBtn.href = search.updates_url;
+                visitUrlBtn.style.display = 'inline-flex';
+            } else {
+                visitUrlBtn.style.display = 'none';
+            }
+
+            // Ensure modal is active (editSearch already does this, but good to ensure)
             searchModal.classList.add('active');
         };
 
