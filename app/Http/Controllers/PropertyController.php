@@ -72,7 +72,7 @@ class PropertyController extends Controller
     /**
      * Reusable method to scrape properties from a given Rightmove URL
      */
-    public function scrapeProperties($baseUrl) 
+    public function scrapeProperties($baseUrl, $fetchAll = true) 
     {
         try {
             $client = new Client([
@@ -90,7 +90,8 @@ class PropertyController extends Controller
             $allUrls = [];
             
             // Scrape multiple pages until no more properties are found
-            $maxPages = 50; // Increased to ensure we get all properties
+            // If fetching only one page, set maxPages to 1
+            $maxPages = $fetchAll ? 50 : 1; 
             $consecutiveEmptyPages = 0;
             $maxConsecutiveEmptyPages = 5; // Stop if we get 5 empty pages in a row (increased for reliability)
             
@@ -102,9 +103,14 @@ class PropertyController extends Controller
                 while ($retryCount < $maxRetries && !$pageSuccess) {
                     try {
                         $index = $page * 24;
+                        
+                        // Remove any existing index parameter from URL to avoid duplicates
+                        $cleanUrl = preg_replace('/([?&])index=\d+(&|$)/', '$1', $baseUrl);
+                        $cleanUrl = rtrim($cleanUrl, '&?'); // Clean trailing ? or &
+                        
                         // Append index to URL correctly (check if query string exists)
-                        $separator = (strpos($baseUrl, '?') !== false) ? '&' : '?';
-                        $url = $page === 0 ? $baseUrl : $baseUrl . $separator . 'index=' . $index;
+                        $separator = (strpos($cleanUrl, '?') !== false) ? '&' : '?';
+                        $url = $page === 0 ? $cleanUrl : $cleanUrl . $separator . 'index=' . $index;
                         
                         \Log::info("Fetching page: " . ($page + 1) . " (Attempt " . ($retryCount + 1) . ") - URL: " . $url);
                         

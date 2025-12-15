@@ -6,14 +6,14 @@ use App\Http\Controllers\PropertyController;
 use App\Http\Controllers\InternalPropertyController;
 use Illuminate\Support\Facades\Route;
 
-// Public routes
+// Public routes - redirect to dashboard (which requires login)
 Route::get('/', function () {
-    return view('welcome');
+    return redirect()->route('dashboard');
 });
 
 Route::get('/dashboard', function () {
     return view('dashboard');
-})->name('dashboard'); // Removed auth & verified middleware
+})->middleware(['auth'])->name('dashboard');
 
 // Profile routes (still require authentication)
 Route::middleware('auth')->group(function () {
@@ -43,17 +43,19 @@ Route::post('/api/internal-property/fetch-all', [InternalPropertyController::cla
 Route::post('/api/internal-property/sync', [InternalPropertyController::class, 'sync'])->name('internal-property.sync');
 Route::get('/internal-properties/search/{id}', [InternalPropertyController::class, 'show'])->name('internal-property.show');
 
-// Saved Search routes
-Route::get('/searchproperties', [App\Http\Controllers\SavedSearchController::class, 'showPage'])->name('searchproperties.index');
-Route::get('/api/saved-searches', [App\Http\Controllers\SavedSearchController::class, 'index']);
-Route::post('/api/saved-searches', [App\Http\Controllers\SavedSearchController::class, 'store']);
-Route::put('/api/saved-searches/{id}', [App\Http\Controllers\SavedSearchController::class, 'update']);
-Route::delete('/api/saved-searches/{id}', [App\Http\Controllers\SavedSearchController::class, 'destroy']);
+// Saved Search routes (require authentication)
+Route::middleware(['auth'])->group(function () {
+    Route::get('/searchproperties', [App\Http\Controllers\SavedSearchController::class, 'showPage'])->name('searchproperties.index');
+    Route::get('/api/saved-searches', [App\Http\Controllers\SavedSearchController::class, 'index']);
+    Route::post('/api/saved-searches', [App\Http\Controllers\SavedSearchController::class, 'store']);
+    Route::put('/api/saved-searches/{id}', [App\Http\Controllers\SavedSearchController::class, 'update']);
+    Route::delete('/api/saved-searches/{id}', [App\Http\Controllers\SavedSearchController::class, 'destroy']);
 
-// Area routes
-Route::get('/api/areas', [App\Http\Controllers\SavedSearchController::class, 'getAreas']);
-Route::post('/api/areas/check', [App\Http\Controllers\SavedSearchController::class, 'checkArea']);
-Route::post('/api/areas/refresh', [App\Http\Controllers\SavedSearchController::class, 'refreshAreas']);
+    // Area routes
+    Route::get('/api/areas', [App\Http\Controllers\SavedSearchController::class, 'getAreas']);
+    Route::post('/api/areas/check', [App\Http\Controllers\SavedSearchController::class, 'checkArea']);
+    Route::post('/api/areas/refresh', [App\Http\Controllers\SavedSearchController::class, 'refreshAreas']);
+});
 
 // Auth routes
 require __DIR__.'/auth.php';

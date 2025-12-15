@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Services\InternalPropertyService;
 use App\Models\SavedSearch;
+use App\Models\Url;
 use Illuminate\Support\Facades\Log;
 
 class InternalPropertyController extends Controller
@@ -144,28 +145,31 @@ class InternalPropertyController extends Controller
     {
         try {
             $searchId = $request->input('search_id');
+            $import = $request->input('import');
             
             // Generate cache key based on search context
             $cacheKey = $searchId ? "property_urls_search_{$searchId}" : 'property_urls_list';
             
-            // Check cache first (30 minutes TTL)
-            $cached = \Cache::get($cacheKey);
-            
-            if ($cached && isset($cached['urls']) && count($cached['urls']) > 0) {
-                Log::info("Returning " . count($cached['urls']) . " URLs from cache");
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Property URLs loaded from cache',
-                    'count' => count($cached['urls']),
-                    'urls' => $cached['urls'],
-                    'cached' => true,
-                    'cached_at' => $cached['cached_at'] ?? null
-                ]);
+            // IF NOT IMPORT: Check cache first (30 minutes TTL)
+            if (!$import) {
+                $cached = \Cache::get($cacheKey);
+                
+                if ($cached && isset($cached['urls']) && count($cached['urls']) > 0) {
+                    Log::info("Returning " . count($cached['urls']) . " URLs from cache");
+                    return response()->json([
+                        'success' => true,
+                        'message' => 'Property URLs loaded from cache',
+                        'count' => count($cached['urls']),
+                        'urls' => $cached['urls'],
+                        'cached' => true,
+                        'cached_at' => $cached['cached_at'] ?? null
+                    ]);
+                }
             }
             
-            Log::info("Cache miss - fetching fresh URLs from PropertyController");
+            Log::info("Fetching fresh URLs from PropertyController (Import: " . ($import ? 'Yes' : 'No') . ")");
             
-            // If no cache, fetch from PropertyController
+            // If no cache or importing, fetch from PropertyController
             set_time_limit(600); // 10 minutes
             
             $propertyController = new \App\Http\Controllers\PropertyController();
@@ -174,7 +178,9 @@ class InternalPropertyController extends Controller
                 $search = SavedSearch::find($searchId);
                 if ($search && $search->updates_url) {
                     Log::info("Fetching URLs for Saved Search #{$searchId}: {$search->updates_url}");
-                    $response = $propertyController->scrapeProperties($search->updates_url);
+                    // If importing, only fetch the single page (false for $fetchAll)
+                    // Otherwise fetch all properties (true)
+                    $response = $propertyController->scrapeProperties($search->updates_url, !$import);
                 } else {
                     // Fallback if search not found or no URL
                     $response = $propertyController->sync();
@@ -193,6 +199,36 @@ class InternalPropertyController extends Controller
                 // Cache the successful result for 30 minutes
                 \Cache::put($cacheKey, $data, 1800);
                 Log::info("Cached " . count($data['urls']) . " URLs for future requests");
+
+                // SAVE TO DATABASE if search_id exists
+                if ($searchId) {
+                    try {
+                        Log::info("Saving imported URLs to database for Filter ID: {$searchId}");
+                        
+                        // Clear existing URLs for this filter
+                        Url::where('filter_id', $searchId)->delete();
+                        
+                        // Insert new URLs
+                        $recordsToInsert = [];
+                        foreach ($data['urls'] as $urlData) {
+                            $recordsToInsert[] = [
+                                'filter_id' => $searchId,
+                                'url' => $urlData['url'], // Assuming urlData['url'] exists
+                                'created_at' => now(),
+                                'updated_at' => now()
+                            ];
+                        }
+                        
+                        // Bulk put
+                        if (!empty($recordsToInsert)) {
+                            Url::insert($recordsToInsert);
+                            Log::info("Saved " . count($recordsToInsert) . " URLs to database.");
+                        }
+                        
+                    } catch (\Exception $dbEx) {
+                        Log::error("Failed to save URLs to database: " . $dbEx->getMessage());
+                    }
+                }
             }
             
             return $response;

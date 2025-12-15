@@ -1,12 +1,6 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Save and manage Rightmove property searches">
-    <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>Saved Searches - Property Search Manager</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+@extends('layouts.app')
+
+@section('styles')
     <style>
         * {
             margin: 0;
@@ -441,9 +435,9 @@
             }
         }
     </style>
-</head>
-<body>
-    <div class="container">
+@endsection
+
+@section('content')
         <!-- Header with Add Button -->
         <div class="header">
             <div>
@@ -473,11 +467,11 @@
                     <!-- Hidden field for editing -->
                     <input type="hidden" id="editSearchId" value="">
                     
-                    <!-- Row 1: Area Input with Check Button -->
+                    <!-- Row 1: Area Input -->
             <div class="form-row">
                 <div class="form-group" style="grid-column: span 2;">
-                    <label class="form-label">Enter Area / Region</label>
-                    <input type="text" id="areaInput" class="form-control" placeholder="Enter area name (e.g., London, Manchester, Birmingham)">
+                    <label class="form-label">Enter Area / Region <span style="color: var(--error);">*</span></label>
+                    <input type="text" id="areaInput" class="form-control" placeholder="Type area name (e.g., Birmingham, London, Manchester)">
                     <input type="hidden" id="areaIdentifier" value="">
                     <input type="hidden" id="areaName" value="">
                 </div>
@@ -864,7 +858,9 @@
                 </div>
             </div>
         </div>
-    </div>
+@endsection
+
+@section('scripts')
 
     <script>
         // Elements
@@ -887,6 +883,70 @@
         const areaIdentifier = document.getElementById('areaIdentifier');
         const areaName = document.getElementById('areaName');
 
+        // Area Mapping (Name -> Region ID)
+        const areaMapping = {
+            'Aberdeen': 'REGION^18',
+            'Altrincham': 'REGION^47',
+            'Bath': 'REGION^116',
+            'Belfast': 'REGION^143',
+            'Birmingham': 'REGION^162',
+            'Blackpool': 'REGION^171',
+            'Bolton': 'REGION^179',
+            'Bournemouth': 'REGION^185',
+            'Bradford': 'REGION^194',
+            'Brighton': 'REGION^204',
+            'Bristol': 'REGION^219',
+            'Cambridge': 'REGION^265',
+            'Cardiff': 'REGION^277',
+            'Cheltenham': 'REGION^353',
+            'Chester': 'REGION^351',
+            'Cornwall': 'REGION^24568',
+            'Coventry': 'REGION^430',
+            'Derby': 'REGION^453',
+            'Devon': 'REGION^27195',
+            'Edinburgh': 'REGION^550',
+            'Essex': 'REGION^27180',
+            'Exeter': 'REGION^517',
+            'Glasgow': 'REGION^664',
+            'Guildford': 'REGION^700',
+            'Hampshire': 'REGION^27245',
+            'Hull': 'REGION^755',
+            'Kent': 'REGION^27738',
+            'Leeds': 'REGION^802',
+            'Leicester': 'REGION^806',
+            'Liverpool': 'REGION^835',
+            'London': 'REGION^93965',
+            'Manchester': 'REGION^886',
+            'Milton Keynes': 'REGION^928',
+            'Newcastle Upon Tyne': 'REGION^910',
+            'Norwich': 'REGION^983',
+            'Nottingham': 'REGION^981',
+            'Oxford': 'REGION^1051',
+            'Plymouth': 'REGION^1092',
+            'Portsmouth': 'REGION^1108',
+            'Reading': 'REGION^1140',
+            'Sheffield': 'REGION^1190',
+            'Southampton': 'REGION^1234',
+            'Surrey': 'REGION^27480',
+            'Swansea': 'REGION^1268',
+            'York': 'REGION^1425',
+            'Yorkshire': 'REGION^27585'
+        };
+
+        // Update hidden identifier when user types (or when generating URL)
+        areaInput.addEventListener('input', function() {
+            const name = this.value.trim();
+            // Case-insensitive lookup
+            const foundName = Object.keys(areaMapping).find(key => key.toLowerCase() === name.toLowerCase());
+            
+            if (foundName) {
+                areaIdentifier.value = areaMapping[foundName];
+                areaName.value = foundName; // Normalize casing
+            } else {
+                areaIdentifier.value = '';
+                areaName.value = name;
+            }
+        });
 
         const visitUrlBtn = document.getElementById('visitUrlBtn');
         
@@ -930,6 +990,7 @@
             areaInput.value = '';
             areaIdentifier.value = '';
             areaName.value = '';
+            // areaSelect removed
             // areaStatus removed
             if(minPriceSelect) minPriceSelect.value = '';
             if(maxPriceSelect) maxPriceSelect.value = '';
@@ -1002,42 +1063,25 @@
             const baseUrl = 'https://www.rightmove.co.uk/property-for-sale/find.html';
             const params = new URLSearchParams();
 
-            // Use location identifier flag
-            params.append('useLocationIdentifier', 'true');
-
-            // Location identifier (required for search to work)
+            // Location identifier (preferred) or Search Location (fallback)
             const locationId = areaIdentifier.value;
+            const locationName = areaInput.value.trim();
+
             if (locationId) {
                 params.append('locationIdentifier', locationId);
-            }
-
-            // Search location name (for database storage)
-            const searchLocationName = areaName.value || areaInput.value.trim();
-            if (searchLocationName) {
-                params.append('searchLocation', searchLocationName);
+            } else if (locationName) {
+                // If no ID found but user typed a name, try to use searchLocation
+                // IMPORTANT: Rightmove often fails with "Town, County" format.
+                // We typically need just "Town" for it to work or disambiguate.
+                const cleanLocationName = locationName.split(',')[0].trim();
+                params.append('searchLocation', cleanLocationName);
             }
 
             // Radius
             params.append('radius', '0.0');
 
-            // Include SSTC checkbox state
-            const includeSSTC = document.getElementById('includeSSTC');
-            if (includeSSTC && includeSSTC.checked) {
-                params.append('_includeSSTC', 'on');
-            }
-
-            // Index for pagination
-            params.append('index', '0');
-
             // Sorting - most recent
             params.append('sortType', '2');
-
-            // Channel and transaction type
-            params.append('channel', 'BUY');
-            params.append('transactionType', 'BUY');
-
-            // Display location identifier
-            params.append('displayLocationIdentifier', 'undefined');
 
             // Price
             if (minPriceSelect.value) {
@@ -1076,10 +1120,11 @@
             const checkedTenures = document.querySelectorAll('input[name="tenureType"]:checked');
             if (checkedTenures.length > 0) {
                 const tenures = Array.from(checkedTenures).map(cb => cb.value).join(',');
-                params.append('tenureTypes', tenures);
+                params.append('tenure', tenures);
             }
 
             // Include Under Offer / Sold STC
+            const includeSSTC = document.getElementById('includeSSTC');
             if (includeSSTC && includeSSTC.checked) {
                 params.append('includeSSTC', 'true');
             }
@@ -1098,11 +1143,6 @@
                 params.append('dontShow', dontShows);
             }
 
-            // Date Added (removed from URL for cleaner format, can be added if needed)
-            // if (maxDaysSinceAddedSelect.value) {
-            //     params.append('maxDaysSinceAdded', maxDaysSinceAddedSelect.value);
-            // }
-
             return `${baseUrl}?${params.toString()}`;
         }
 
@@ -1110,12 +1150,59 @@
         const generateUrlBtn = document.getElementById('generateUrlBtn');
         const generatedUrlInput = document.getElementById('generatedUrlInput');
         
-        generateUrlBtn.addEventListener('click', () => {
-            // No area validation needed now
+        generateUrlBtn.addEventListener('click', async () => {
+            // Validate that we have either an identifier or a name
+            const locationId = areaIdentifier.value;
+            let locationName = areaInput.value.trim();
             
-            const url = buildRightmoveUrl();
-            generatedUrlInput.value = url;
-            showAlert('success', 'URL generated successfully! You can edit it before saving.');
+            if (!locationId && !locationName) {
+                showAlert('error', 'Please enter an area name first.');
+                areaInput.focus();
+                return;
+            }
+
+            // Show loading state
+            generateUrlBtn.disabled = true;
+            generateUrlBtn.textContent = 'Generating...';
+
+            try {
+                // If we don't have an ID but have a name, try to fetch the ID silently
+                if (!locationId && locationName) {
+                    // Clean the name (e.g. "Bromley, London" -> "Bromley") to improve lookup success
+                    const cleanNameForLookup = locationName.split(',')[0].trim();
+                    
+                    try {
+                        const response = await fetch('/api/areas/check', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                            },
+                            body: JSON.stringify({ area: cleanNameForLookup })
+                        });
+                        
+                        const data = await response.json();
+                        if (data.success && data.found) {
+                            areaIdentifier.value = data.identifier;
+                            areaName.value = data.name;
+                            // Update locationName to the official name found
+                            locationName = data.name; // This ensures buildRightmoveUrl uses the official name if fallback needed (though ID overrides)
+                        }
+                    } catch (err) {
+                        console.warn('Silent area check failed, falling back to basic name', err);
+                    }
+                }
+                
+                const url = buildRightmoveUrl();
+                generatedUrlInput.value = url;
+                showAlert('success', 'URL generated successfully!');
+                
+            } catch (error) {
+                showAlert('error', 'Error generating URL: ' + error.message);
+            } finally {
+                generateUrlBtn.disabled = false;
+                generateUrlBtn.innerHTML = '<i class="fas fa-magic"></i> Generate URL';
+            }
         });
 
         // Load Searches on Page Load
@@ -1392,13 +1479,28 @@
                 const urlObj = new URL(search.updates_url);
                 const params = new URLSearchParams(urlObj.search);
 
-                // Set area by locationIdentifier and searchLocation
+                // Set area by locationIdentifier
                 const locationId = params.get('locationIdentifier') || '';
                 const searchLocation = params.get('searchLocation') || '';
+                
                 if (locationId) {
                     areaIdentifier.value = locationId;
-                    areaName.value = searchLocation;
-                    areaInput.value = searchLocation;
+                    
+                    if (searchLocation) {
+                        areaName.value = searchLocation;
+                        areaInput.value = searchLocation;
+                    } else {
+                        // Reverse lookup from areaMapping
+                        const foundName = Object.keys(areaMapping).find(key => areaMapping[key] === locationId);
+                        if (foundName) {
+                            areaName.value = foundName;
+                            areaInput.value = foundName;
+                        } else {
+                            // If ID exists but name unknown, at least show the ID or leave empty
+                            areaName.value = locationId; // fallback
+                            areaInput.value = ''; // leave input empty or show ID? Empty is safer
+                        }
+                    }
                 }
 
                 // Set prices
@@ -1555,5 +1657,4 @@
             }
         });
     </script>
-</body>
-</html>
+@endsection

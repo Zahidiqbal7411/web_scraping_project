@@ -1,17 +1,6 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Browse retirement properties from Rightmove">
-    <title>
-        @if(isset($search))
-            {{ str_replace('+', ' ', urldecode($search->area)) }} - Property Details
-        @else
-            Internal Properties - Property Listings
-        @endif
-    </title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+@extends('layouts.app')
+
+@section('styles')
     <style>
         * {
             margin: 0;
@@ -570,6 +559,213 @@
             font-style: italic;
         }
 
+        /* Property URL */
+        .property-url-wrapper {
+            margin-bottom: 0.75rem;
+        }
+
+        .property-url-display {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .property-url {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            word-break: break-all;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .property-url a {
+            color: var(--secondary);
+            text-decoration: none;
+            transition: color 0.2s ease;
+        }
+
+        .property-url a:hover {
+            color: var(--primary);
+            text-decoration: underline;
+        }
+
+        .url-edit-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0.25rem;
+            color: var(--text-secondary);
+            transition: color 0.2s ease;
+            flex-shrink: 0;
+        }
+
+        .url-edit-btn:hover {
+            color: var(--primary);
+        }
+
+        .property-url-edit {
+            display: none;
+        }
+
+        .property-url-edit.active {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .property-url-edit input {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid var(--card-border);
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-family: inherit;
+        }
+
+        .property-url-edit input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .url-edit-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .url-save-btn, .url-cancel-btn {
+            padding: 0.375rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .url-save-btn {
+            background: var(--success);
+            color: white;
+            border: none;
+        }
+
+        .url-save-btn:hover {
+            background: hsl(142, 70%, 40%);
+        }
+
+        .url-cancel-btn {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--card-border);
+        }
+
+        .url-cancel-btn:hover {
+            background: rgba(0, 0, 0, 0.05);
+        }
+
+        /* Search URL Bar */
+        .search-url-bar {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            padding: 1rem 1.25rem;
+            margin-bottom: 1.5rem;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .search-url-label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.5rem;
+        }
+
+        .search-url-display {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .search-url-text {
+            flex: 1;
+            font-size: 0.875rem;
+            color: var(--secondary);
+            word-break: break-all;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .search-url-text a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .search-url-text a:hover {
+            text-decoration: underline;
+        }
+
+        .search-url-edit-section {
+            display: none;
+        }
+
+        .search-url-edit-section.active {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .search-url-edit-section input {
+            width: 100%;
+            padding: 0.625rem;
+            border: 1px solid var(--card-border);
+            border-radius: 6px;
+            font-size: 0.875rem;
+            font-family: inherit;
+        }
+
+        .search-url-edit-section input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .search-url-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .search-url-btn {
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .search-url-btn.save {
+            background: var(--success);
+            color: white;
+            border: none;
+        }
+
+        .search-url-btn.save:hover {
+            background: hsl(142, 70%, 40%);
+        }
+
+        .search-url-btn.cancel {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--card-border);
+        }
+
+        .search-url-btn.cancel:hover {
+            background: rgba(0, 0, 0, 0.05);
+        }
+
         .property-actions {
             display: flex;
             gap: 0.75rem;
@@ -652,8 +848,9 @@
             }
         }
     </style>
-</head>
-<body>
+@endsection
+
+@section('content')
     <div class="container">
         <!-- Header -->
         <div class="header">
@@ -666,11 +863,36 @@
             </h1>
             <button class="sync-btn" id="syncBtn">
                 <svg class="sync-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
                 </svg>
-                Sync Properties
+                Import Properties (Step: 01)
             </button>
         </div>
+
+        @if(isset($search) && $search->updates_url)
+        <!-- Search URL Bar -->
+        <div class="search-url-bar">
+            <div class="search-url-label">Search URL</div>
+            <div class="search-url-display" id="searchUrlDisplay">
+                <div class="search-url-text" title="{{ $search->updates_url }}">
+                    <a href="{{ $search->updates_url }}" target="_blank" id="searchUrlLink">{{ $search->updates_url }}</a>
+                </div>
+                <button class="url-edit-btn" onclick="toggleSearchUrlEdit()" title="Edit URL">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                              d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="search-url-edit-section" id="searchUrlEdit">
+                <input type="text" id="searchUrlInput" value="{{ $search->updates_url }}" placeholder="Enter Rightmove URL">
+                <div class="search-url-actions">
+                    <button class="search-url-btn save" onclick="saveSearchUrl()">Save</button>
+                    <button class="search-url-btn cancel" onclick="cancelSearchUrlEdit()">Cancel</button>
+                </div>
+            </div>
+        </div>
+        @endif
 
         <!-- Stats Bar -->
         <div class="stats-bar" id="statsBar" style="display: none;">
@@ -697,14 +919,15 @@
         <!-- Empty State -->
         <div class="empty-state active" id="emptyState">
             <div class="empty-icon">🏠</div>
-            <p class="empty-text">Click the "Sync Properties" button to load property listings</p>
+            <p class="empty-text">Click the "Import Properties" button to load property listings</p>
             <p style="color: var(--text-secondary); font-size: 0.875rem;">This will fetch data from approximately 620 property URLs</p>
         </div>
 
         <!-- Properties Grid -->
         <div class="properties-grid" id="propertiesGrid"></div>
-    </div>
+@endsection
 
+@section('scripts')
     <script>
         window.searchContext = @json($search ?? null);
     </script>
@@ -730,13 +953,13 @@
         // Sample property URLs - in real implementation, this would come from your database or API
         // These will be fetched dynamically from the PropertyController
 
-        // Sync button handler
+        // Import button handler
         syncBtn.addEventListener('click', async () => {
-            await syncAllProperties();
+            await importAllProperties();
         });
 
-        // Sync all properties with OPTIMIZED concurrent progressive loading
-        async function syncAllProperties() {
+        // Import all properties with OPTIMIZED concurrent progressive loading
+        async function importAllProperties() {
             try {
                 // Hide empty state
                 emptyState.classList.remove('active');
@@ -748,11 +971,11 @@
                 syncBtn.disabled = true;
 
                 // Fetch all property URLs (instant if cached)
-                showAlert('success', 'Loading property URLs...');
+                showAlert('success', 'Importing property URLs...');
                 
                 const url = window.searchContext 
-                    ? `/api/internal-property/fetch-urls?search_id=${window.searchContext.id}` 
-                    : '/api/internal-property/fetch-urls';
+                    ? `/api/internal-property/fetch-urls?search_id=${window.searchContext.id}&import=true` 
+                    : '/api/internal-property/fetch-urls?import=true';
                 
                 const urlsResponse = await fetch(url);
                 
@@ -769,6 +992,8 @@
                 // Show cache status if available
                 if (urlsData.cached) {
                     showAlert('success', `Loaded ${urlsData.urls.length} properties from cache`);
+                } else {
+                    showAlert('success', `Imported ${urlsData.urls.length} properties`);
                 }
 
                 propertyUrls = urlsData.urls;
@@ -803,8 +1028,8 @@
                 await loadDetailsConcurrently(propertyUrls);
 
             } catch (error) {
-                console.error('Error syncing properties:', error);
-                showAlert('error', error.message || 'An error occurred while syncing properties');
+                console.error('Error importing properties:', error);
+                showAlert('error', error.message || 'An error occurred while importing properties');
                 emptyState.classList.add('active');
                 loading.classList.remove('active');
                 syncBtn.disabled = false;
@@ -975,6 +1200,27 @@
                     
                     <div class="property-info-section">
                         <h3 class="property-address-title">${property.address}</h3>
+                        <div class="property-url-wrapper" onclick="event.stopPropagation()">
+                            <div class="property-url-display" id="url-display-${property.id}">
+                                <div class="property-url" title="${property.url}">
+                                    <a href="${property.url}" target="_blank" id="url-link-${property.id}">${property.url}</a>
+                                </div>
+                                <button class="url-edit-btn" onclick="toggleUrlEdit('${property.id}', '${property.url.replace(/'/g, "\\'")}')"
+                                        title="Edit URL">
+                                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                                              d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                            <div class="property-url-edit" id="url-edit-${property.id}">
+                                <input type="text" id="url-input-${property.id}" value="${property.url}" placeholder="Enter URL">
+                                <div class="url-edit-actions">
+                                    <button class="url-save-btn" onclick="saveUrl('${property.id}')">Save</button>
+                                    <button class="url-cancel-btn" onclick="cancelUrlEdit('${property.id}')">Cancel</button>
+                                </div>
+                            </div>
+                        </div>
                         
                         <div class="property-price-section">
                             <span class="price-amount">${property.price}</span>
@@ -1132,6 +1378,74 @@
             }
         }
 
+        // Toggle URL edit mode
+        function toggleUrlEdit(propertyId, currentUrl) {
+            const urlDisplay = document.getElementById(`url-display-${propertyId}`);
+            const urlEdit = document.getElementById(`url-edit-${propertyId}`);
+            const urlInput = document.getElementById(`url-input-${propertyId}`);
+            
+            if (urlDisplay && urlEdit) {
+                urlDisplay.style.display = 'none';
+                urlEdit.classList.add('active');
+                urlInput.value = currentUrl;
+                urlInput.focus();
+                urlInput.select();
+            }
+        }
+        
+        // Save URL
+        function saveUrl(propertyId) {
+            const urlDisplay = document.getElementById(`url-display-${propertyId}`);
+            const urlEdit = document.getElementById(`url-edit-${propertyId}`);
+            const urlInput = document.getElementById(`url-input-${propertyId}`);
+            const urlLink = document.getElementById(`url-link-${propertyId}`);
+            
+            const newUrl = urlInput.value.trim();
+            
+            if (newUrl && urlLink) {
+                // Update the displayed URL
+                urlLink.href = newUrl;
+                urlLink.textContent = newUrl;
+                urlLink.parentElement.title = newUrl;
+                
+                // Update the edit button's onclick with new URL
+                const editBtn = urlDisplay.querySelector('.url-edit-btn');
+                if (editBtn) {
+                    editBtn.onclick = function() { toggleUrlEdit(propertyId, newUrl.replace(/'/g, "\\'")); };
+                }
+                
+                // Also update the View on Rightmove button
+                const card = document.getElementById(`card-${propertyId}`);
+                if (card) {
+                    const viewBtn = card.querySelector('.view-btn');
+                    if (viewBtn) {
+                        viewBtn.href = newUrl;
+                    }
+                }
+                
+                // Update the property in loadedProperties array
+                const property = loadedProperties.find(p => p.id == propertyId);
+                if (property) {
+                    property.url = newUrl;
+                }
+                
+                showAlert('success', 'URL updated successfully');
+            }
+            
+            // Hide edit mode, show display mode
+            urlEdit.classList.remove('active');
+            urlDisplay.style.display = 'flex';
+        }
+        
+        // Cancel URL edit
+        function cancelUrlEdit(propertyId) {
+            const urlDisplay = document.getElementById(`url-display-${propertyId}`);
+            const urlEdit = document.getElementById(`url-edit-${propertyId}`);
+            
+            urlEdit.classList.remove('active');
+            urlDisplay.style.display = 'flex';
+        }
+
         // Alert helper
         function showAlert(type, message) {
             const alert = type === 'success' ? successAlert : errorAlert;
@@ -1142,6 +1456,101 @@
                 alert.classList.remove('active');
             }, 5000);
         }
+
+        // Toggle Search URL edit mode
+        function toggleSearchUrlEdit() {
+            const urlDisplay = document.getElementById('searchUrlDisplay');
+            const urlEdit = document.getElementById('searchUrlEdit');
+            const urlInput = document.getElementById('searchUrlInput');
+            
+            if (urlDisplay && urlEdit) {
+                urlDisplay.style.display = 'none';
+                urlEdit.classList.add('active');
+                urlInput.focus();
+                urlInput.select();
+            }
+        }
+        
+        // Save Search URL
+        async function saveSearchUrl() {
+            const urlDisplay = document.getElementById('searchUrlDisplay');
+            const urlEdit = document.getElementById('searchUrlEdit');
+            const urlInput = document.getElementById('searchUrlInput');
+            const urlLink = document.getElementById('searchUrlLink');
+            const saveBtn = urlEdit.querySelector('.search-url-btn.save');
+            
+            const newUrl = urlInput.value.trim();
+            
+            if (!newUrl) {
+                showAlert('error', 'URL cannot be empty');
+                return;
+            }
+            
+            // Disable save button while saving
+            if (saveBtn) {
+                saveBtn.disabled = true;
+                saveBtn.textContent = 'Saving...';
+            }
+            
+            try {
+                // Save to database if we have a search context
+                if (window.searchContext && window.searchContext.id) {
+                    const response = await fetch(`/api/saved-searches/${window.searchContext.id}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || ''
+                        },
+                        body: JSON.stringify({
+                            updates_url: newUrl
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (!response.ok || !data.success) {
+                        throw new Error(data.message || 'Failed to save URL');
+                    }
+                }
+                
+                // Update the displayed URL
+                if (urlLink) {
+                    urlLink.href = newUrl;
+                    urlLink.textContent = newUrl;
+                    urlLink.parentElement.title = newUrl;
+                }
+                
+                // Update the search context for fetching properties
+                if (window.searchContext) {
+                    window.searchContext.updates_url = newUrl;
+                }
+                
+                showAlert('success', 'Search URL updated successfully');
+                
+            } catch (error) {
+                console.error('Error saving URL:', error);
+                showAlert('error', 'Failed to save URL: ' + error.message);
+            } finally {
+                // Re-enable save button
+                if (saveBtn) {
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = 'Save';
+                }
+            }
+            
+            // Hide edit mode, show display mode
+            urlEdit.classList.remove('active');
+            urlDisplay.style.display = 'flex';
+        }
+        
+        // Cancel Search URL edit
+        function cancelSearchUrlEdit() {
+            const urlDisplay = document.getElementById('searchUrlDisplay');
+            const urlEdit = document.getElementById('searchUrlEdit');
+            
+            urlEdit.classList.remove('active');
+            urlDisplay.style.display = 'flex';
+        }
     </script>
-</body>
-</html>
+@endsection

@@ -322,23 +322,9 @@ class SavedSearchController extends Controller
             ]);
         }
 
-        $predefinedAreas = $this->getPredefinedAreas();
-        
-        // Strategy 1: Exact match only in predefined areas (for simple one-word searches)
-        foreach ($predefinedAreas as $area) {
-            if (strcasecmp($area['name'], $searchTerm) === 0) {
-                return response()->json([
-                    'success' => true,
-                    'found' => true,
-                    'identifier' => $area['identifier'],
-                    'name' => $area['name'],
-                    'type' => 'REGION'
-                ]);
-            }
-        }
-        
-        // Strategy 2: Try Rightmove API FIRST for specific/compound locations
+        // Strategy 1: Try Rightmove API FIRST for specific/compound locations
         // This ensures "Weston, Bath, Somerset" gets the correct specific identifier
+        // AND ensures we get the correct ID for regions like "Cheshire" if our hardcoded list is wrong
         $apiResult = $this->callRightmoveTypeahead($searchTerm);
         
         if ($apiResult !== null && !empty($apiResult['typeAheadLocations'])) {
@@ -351,12 +337,28 @@ class SavedSearchController extends Controller
                 'type' => $firstMatch['locationType'] ?? 'UNKNOWN'
             ]);
         }
+
+        $predefinedAreas = $this->getPredefinedAreas();
         
-        // Strategy 3: If input contains comma (e.g., "Altrincham, Greater Manchester"), extract first part
-        if (strpos($searchTerm, ',') !== false) {
+        // Strategy 2: Exact match only in predefined areas (Fallback if API fails)
+        foreach ($predefinedAreas as $area) {
+            if (strcasecmp($area['name'], $searchTerm) === 0) {
+                Log::info("Area matched via Strategy 2 (Exact Match): {$searchTerm} -> {$area['name']}");
+                return response()->json([
+                    'success' => true,
+                    'found' => true,
+                    'identifier' => $area['identifier'],
+                    'name' => $area['name'],
+                    'type' => 'REGION'
+                ]);
+            }
+        }
+        
+            if (strpos($searchTerm, ',') !== false) {
             $firstPart = trim(explode(',', $searchTerm)[0]);
             foreach ($predefinedAreas as $area) {
                 if (strcasecmp($area['name'], $firstPart) === 0) {
+                    Log::info("Area matched via Strategy 3 (First Part Match): {$searchTerm} -> {$area['name']}");
                     return response()->json([
                         'success' => true,
                         'found' => true,
@@ -373,6 +375,7 @@ class SavedSearchController extends Controller
         foreach ($predefinedAreas as $area) {
             $areaLower = strtolower($area['name']);
             if (strpos($searchLower, $areaLower) === 0 || strpos($areaLower, $searchLower) === 0) {
+                Log::info("Area matched via Strategy 4 (Prefix/Start Match): {$searchTerm} -> {$area['name']}");
                 return response()->json([
                     'success' => true,
                     'found' => true,
@@ -383,23 +386,14 @@ class SavedSearchController extends Controller
             }
         }
         
-        // Strategy 5: Partial match in predefined areas
-        foreach ($predefinedAreas as $area) {
-            if (strpos(strtolower($area['name']), $searchLower) !== false) {
-                return response()->json([
-                    'success' => true,
-                    'found' => true,
-                    'identifier' => $area['identifier'],
-                    'name' => $area['name'],
-                    'type' => 'REGION'
-                ]);
-            }
-        }
-
+        // Strategy 5: Partial match in predefined areas - REMOVED due to incorrect matches
+        // (e.g., searching "field" matched "Chesterfield")
+        
         // Strategy 6: Check if search term contains any predefined area name (fallback when API fails)
         // e.g., "Weston, Bath, Somerset" contains "Bath"
         foreach ($predefinedAreas as $area) {
             if (stripos($searchTerm, $area['name']) !== false) {
+                Log::info("Area matched via Strategy 6 (Contains Area Name): {$searchTerm} -> {$area['name']}");
                 return response()->json([
                     'success' => true,
                     'found' => true,
@@ -554,7 +548,7 @@ class SavedSearchController extends Controller
             ['name' => 'Dorset', 'identifier' => 'REGION^27147'],
             ['name' => 'Dundee', 'identifier' => 'REGION^548'],
             ['name' => 'Durham', 'identifier' => 'REGION^2828'],
-            ['name' => 'Eastbourne', 'identifier' => 'REGION^493'],
+            ['name' => 'Durham', 'identifier' => 'REGION^2828'],
             ['name' => 'Edinburgh', 'identifier' => 'REGION^550'],
             ['name' => 'Essex', 'identifier' => 'REGION^27180'],
             ['name' => 'Exeter', 'identifier' => 'REGION^517'],
@@ -659,6 +653,16 @@ class SavedSearchController extends Controller
             ['name' => 'West Sussex', 'identifier' => 'REGION^27546'],
             ['name' => 'West Yorkshire', 'identifier' => 'REGION^27549'],
             ['name' => 'Worcestershire', 'identifier' => 'REGION^27571'],
+            ['name' => 'Worcestershire', 'identifier' => 'REGION^27571'],
+            // London Boroughs & Areas
+            ['name' => 'Bromley', 'identifier' => 'REGION^93977'],
+            ['name' => 'Croydon', 'identifier' => 'REGION^93953'],
+            ['name' => 'Ealing', 'identifier' => 'REGION^93941'],
+            ['name' => 'Harrow', 'identifier' => 'REGION^93962'],
+            ['name' => 'Hounslow', 'identifier' => 'REGION^93947'],
+            ['name' => 'Kingston upon Thames', 'identifier' => 'REGION^93974'],
+            ['name' => 'Richmond upon Thames', 'identifier' => 'REGION^93944'],
+            ['name' => 'Sutton', 'identifier' => 'REGION^93971'],
             // More Towns
             ['name' => 'Aylesbury', 'identifier' => 'REGION^86'],
             ['name' => 'Barnsley', 'identifier' => 'REGION^107'],

@@ -94,14 +94,7 @@
                 <p class="text-gray-600 mt-2">Web scraping project</p>
             </div>
             <div class="flex gap-2">
-                <button 
-                    id="view-searches-btn"
-                    class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md transition duration-200 flex items-center space-x-2">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
-                    </svg>
-                    <span>View Saved Searches</span>
-                </button>
+
                 <button 
                     id="fetch-btn" 
                     class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md transition duration-200 flex items-center space-x-2">
@@ -113,25 +106,7 @@
             </div>
         </div>
 
-        <!-- Save Search Input -->
-        <div class="bg-white rounded-lg shadow p-6 mb-8">
-            <h2 class="text-xl font-semibold text-gray-800 mb-4">Save New Search</h2>
-            <div class="flex gap-4">
-                <input 
-                    type="text" 
-                    id="rightmove-url-input"
-                    placeholder="Paste Rightmove URL here (e.g. https://www.rightmove.co.uk/property-for-sale/find.html?...)"
-                    class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition duration-150">
-                <button 
-                    id="save-search-btn"
-                    class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-6 rounded-lg shadow transition duration-200 flex items-center gap-2 whitespace-nowrap">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path>
-                    </svg>
-                    Save Search
-                </button>
-            </div>
-        </div>
+
 
         <!-- Stats -->
         <div id="stats-container" class="hidden grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
@@ -210,35 +185,7 @@
             <p class="text-gray-500 text-lg mt-4">Click "Fetch URLs" to load property URLs from Rightmove</p>
             <p class="text-gray-400 text-sm mt-2">This will fetch approximately 600 internal property URLs</p>
         </div>
-        <!-- Saved Searches Modal -->
-        <div id="saved-searches-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden overflow-y-auto h-full w-full z-50">
-            <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-5xl shadow-lg rounded-md bg-white">
-                <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-xl font-bold text-gray-900">Saved Searches</h3>
-                    <button id="close-modal-btn" class="text-gray-400 hover:text-gray-500">
-                        <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                        </svg>
-                    </button>
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="min-w-full divide-y divide-gray-200">
-                        <thead class="bg-gray-50">
-                            <tr>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Area</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price Range</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Bedrooms</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="saved-searches-body" class="bg-white divide-y divide-gray-200">
-                            <!-- Populated via JS -->
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
+
     </div>
 
     <script>
@@ -251,12 +198,7 @@
         const lastUpdatedElement = document.getElementById('last-updated');
 
         // Saved Search Elements
-        const saveSearchBtn = document.getElementById('save-search-btn');
-        const urlInput = document.getElementById('rightmove-url-input');
-        const viewSearchesBtn = document.getElementById('view-searches-btn');
-        const savedSearchesModal = document.getElementById('saved-searches-modal');
-        const closeModalBtn = document.getElementById('close-modal-btn');
-        const savedSearchesBody = document.getElementById('saved-searches-body');
+
 
         // Show notification
         function showNotification(message, type = 'success') {
@@ -348,133 +290,7 @@
             `).join('');
         }
 
-        // --- Saved Searches Logic ---
 
-        // Save Search
-        saveSearchBtn.addEventListener('click', async () => {
-            const url = urlInput.value.trim();
-            if (!url) {
-                showNotification('Please enter a valid URL', 'error');
-                return;
-            }
-
-            const originalContent = saveSearchBtn.innerHTML;
-            saveSearchBtn.disabled = true;
-            saveSearchBtn.innerHTML = '<span class="loading"></span> Saving...';
-
-            try {
-                const response = await fetch('/api/saved-searches', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                    },
-                    body: JSON.stringify({ updates_url: url })
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    showNotification('Search saved successfully!', 'success');
-                    urlInput.value = '';
-                } else {
-                    showNotification(data.message || 'Failed to save search', 'error');
-                }
-            } catch (error) {
-                showNotification('Network error: ' + error.message, 'error');
-            } finally {
-                saveSearchBtn.disabled = false;
-                saveSearchBtn.innerHTML = originalContent;
-            }
-        });
-
-        // Toggle Modal
-        viewSearchesBtn.addEventListener('click', () => {
-            savedSearchesModal.classList.remove('hidden');
-            loadSavedSearches();
-        });
-
-        closeModalBtn.addEventListener('click', () => {
-            savedSearchesModal.classList.add('hidden');
-        });
-
-        // Close modal on outside click
-        savedSearchesModal.addEventListener('click', (e) => {
-            if (e.target === savedSearchesModal) {
-                savedSearchesModal.classList.add('hidden');
-            }
-        });
-
-        // Load Saved Searches
-        async function loadSavedSearches() {
-            savedSearchesBody.innerHTML = '<tr><td colspan="5" class="text-center py-4">Loading...</td></tr>';
-
-            try {
-                const response = await fetch('/api/saved-searches');
-                const data = await response.json();
-
-                if (data.success && data.searches) {
-                    if (data.searches.length === 0) {
-                        savedSearchesBody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-gray-500">No saved searches found</td></tr>';
-                        return;
-                    }
-
-                    savedSearchesBody.innerHTML = data.searches.map(search => {
-                        const minPrice = search.min_price ? `£${parseInt(search.min_price).toLocaleString()}` : '0';
-                        const maxPrice = search.max_price ? `£${parseInt(search.max_price).toLocaleString()}` : 'Max';
-                        const minBed = search.min_bed || '0';
-                        const maxBed = search.max_bed || 'Max';
-                        const type = search.property_type ? search.property_type.replace(/,/g, ', ') : 'Any';
-                        const area = search.area ? search.area.replace(/\+/g, ' ') : 'Unknown';
-
-                        return `
-                            <tr class="hover:bg-gray-50">
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${area}</td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${minPrice} - ${maxPrice}</td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${minBed} - ${maxBed} Beds</td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 capitalize">${type}</td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                    <div class="flex gap-2">
-                                        <a href="${search.updates_url}" target="_blank" class="text-indigo-600 hover:text-indigo-900 bg-indigo-50 px-3 py-1 rounded-md">View</a>
-                                        <button onclick="deleteSearch(${search.id})" class="text-red-600 hover:text-red-900 bg-red-50 px-3 py-1 rounded-md">Delete</button>
-                                    </div>
-                                </td>
-                            </tr>
-                        `;
-                    }).join('');
-                } else {
-                    savedSearchesBody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-red-500">Failed to load searches</td></tr>';
-                }
-            } catch (error) {
-                console.error(error);
-                savedSearchesBody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-red-500">Error loading searches</td></tr>';
-            }
-        }
-
-        // Delete Search
-        window.deleteSearch = async (id) => {
-            if (!confirm('Are you sure you want to delete this saved search?')) return;
-
-            try {
-                const response = await fetch(`/api/saved-searches/${id}`, {
-                    method: 'DELETE',
-                    headers: {
-                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                    }
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    showNotification('Search deleted successfully', 'success');
-                    loadSavedSearches(); // Reload list
-                } else {
-                    showNotification('Failed to delete search', 'error');
-                }
-            } catch (error) {
-                showNotification('Error deleting search', 'error');
-            }
-        };
     </script>
 </body>
 </html>
