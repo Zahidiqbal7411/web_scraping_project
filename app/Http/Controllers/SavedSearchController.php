@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\SavedSearch;
+use App\Models\Url;
 use Illuminate\Http\Request;
 use GuzzleHttp\Client;
 use Symfony\Component\DomCrawler\Crawler;
@@ -26,6 +27,12 @@ class SavedSearchController extends Controller
 
     public function store(Request $request)
     {
+        // Delete all existing saved searches to ensure only one exists
+        SavedSearch::query()->delete();
+        
+        // Also delete all existing scraped URLs since we are resetting the search
+        Url::query()->delete();
+
         $validated = $request->validate([
             'updates_url' => 'required|url',
         ]);
@@ -106,6 +113,8 @@ class SavedSearchController extends Controller
         $search = SavedSearch::find($id);
         if ($search) {
             $search->delete();
+            // Delete associated URLs
+            Url::where('filter_id', $id)->delete();
             return response()->json(['success' => true, 'message' => 'Search deleted']);
         }
         return response()->json(['success' => false, 'message' => 'Search not found'], 404);
@@ -133,6 +142,9 @@ class SavedSearchController extends Controller
 
         // Update data
         $search->updates_url = $url;
+        
+        // Delete old URLs associated with this search since the URL/criteria changed
+        Url::where('filter_id', $id)->delete();
         if ($request->has('area')) {
             $search->area = $request->input('area');
         }

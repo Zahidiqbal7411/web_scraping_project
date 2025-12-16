@@ -69,6 +69,52 @@ class InternalPropertyService
                         continue;
                     }
                 }
+
+                // Check DATABASE (New logic)
+                // Try to extract ID from URL
+                if (preg_match('/properties\/(\d+)/', $propertyUrl, $matches)) {
+                    $propId = $matches[1];
+                    $dbProperty = \App\Models\Property::with('images')->where('property_id', $propId)->first();
+                    
+                    if ($dbProperty) {
+                        // Always use DB record if found, even if incomplete
+                        // We trust the import process to have done its best
+                        Log::info("Found property in DB: {$propId}");
+                        // Construct data format matching what parsePropertyFromHtml returns
+                        $images = $dbProperty->images->pluck('image_link')->toArray();
+                        $keyFeatures = json_decode($dbProperty->key_features, true) ?? [];
+                        
+                        $propertyData = [
+                            'success' => true,
+                            'url' => $propertyUrl,
+                            'images' => $images,
+                            'title' => $dbProperty->location . ' - ' . $dbProperty->time, // Approximating title
+                            'price' => $dbProperty->price,
+                            'address' => $dbProperty->location,
+                            'property_type' => '', // Stored in DB? Not explicitly.
+                            'bedrooms' => '',
+                            'bathrooms' => '',
+                            'size' => '',
+                            'tenure' => '',
+                            'reduced_on' => '',
+                            'description' => $dbProperty->description,
+                            'key_features' => $keyFeatures,
+                            'all_details' => [
+                                'key_features' => $keyFeatures,
+                                'description' => $dbProperty->description
+                            ]
+                        ];
+
+                        $finalProperty = array_merge($propertyData, [
+                            'id' => $urlKey,
+                            'original_data' => $urlData
+                        ]);
+                        
+                        $properties[] = $finalProperty;
+                        $processed++;
+                        continue; // Skip HTTP request
+                    }
+                }
                 
                 // Create async promise
                 $promises[$urlKey] = $this->client->getAsync($propertyUrl)
@@ -177,6 +223,9 @@ class InternalPropertyService
                 'size' => $details['size'],
                 'tenure' => $details['tenure'],
                 'reduced_on' => $details['reduced_on'],
+                'key_features' => $details['key_features'] ?? [],
+                'description' => $details['description'] ?? '',
+                'sold_link' => $details['sold_link'] ?? null,
                 'all_details' => $details
             ];
             
@@ -301,7 +350,17 @@ class InternalPropertyService
             'bathrooms' => '',
             'size' => '',
             'tenure' => '',
-            'reduced_on' => ''
+            'reduced_on' => '',
+            'key_features' => [],
+            'description' => '',
+            'sold_link' => null,
+            'ground_rent' => '',
+            'annual_service_charge' => '',
+            'lease_length' => '',
+            'council_tax' => '',
+            'parking' => '',
+            'garden' => '',
+            'accessibility' => ''
         ];
         
         try {
@@ -346,21 +405,80 @@ class InternalPropertyService
                 }
             }
             
-            // Tenure
-            $details['tenure'] = $propertyData['tenure']['tenureType'] ?? 
-                                $propertyData['tenure'] ?? 
-                                'Freehold';
-            
-            // Reduced date
-            if (isset($propertyData['firstVisibleDate'])) {
-                $details['reduced_on'] = date('d/m/Y', strtotime($propertyData['firstVisibleDate']));
-            } elseif (isset($propertyData['reducedOn'])) {
-                $details['reduced_on'] = $propertyData['reducedOn'];
+            // Tenure with leasehold details
+            if (isset($propertyData['tenure'])) {
+                $details['tenure'] = $propertyData['tenure']['tenureType'] ?? 'Freehold';
+                if (isset($propertyData['tenure']['yearsRemainingOnLease'])) {
+                     $details['lease_length'] = $propertyData['tenure']['yearsRemainingOnLease'] . ' years';
+                }
+                // Check legacy location for these
+                if (isset($propertyData['tenure']['groundRent'])) {
+                     $details['ground_rent'] = $propertyData['tenure']['groundRent'];
+                }
+                if (isset($propertyData['tenure']['annualServiceCharge'])) {
+                     $details['annual_service_charge'] = $propertyData['tenure']['annualServiceCharge'];
+                }
             }
-            
-            // Get key features if available
-            if (isset($propertyData['keyFeatures'])) {
-                $details['key_features'] = $propertyData['keyFeatures'];
+
+            // Living Costs (Newer JSON structure)
+            if (isset($propertyData['livingCosts'])) {
+                if (isset($propertyData['livingCosts']['annualGroundRent'])) {
+                    $details['ground_rent'] = $propertyData['livingCosts']['annualGroundRent'];
+                }
+                if (isset($propertyData['livingCosts']['annualServiceCharge'])) {
+                    $details['annual_service_charge'] = $propertyData['livingCosts']['annualServiceCharge'];
+                }
+                if (isset($propertyData['livingCosts']['councilTaxBand'])) {
+                    $details['council_tax'] = $propertyData['livingCosts']['councilTaxBand'];
+                }
+            }
+
+            // Council Tax (Fallback)
+            if (empty($details['council_tax'])) {
+                 $details['council_tax'] = $propertyData['councilTaxBand'] ?? 'Ask agent';
+            }
+
+            // Extract Description and Key Features
+            $details['description'] = $propertyData['text']['description'] ?? '';
+            $details['key_features'] = $propertyData['keyFeatures'] ?? [];
+
+            // Extract Sold Link
+            if (isset($propertyData['propertyUrls']['nearbySoldPropertiesUrl'])) {
+                $soldUrl = $propertyData['propertyUrls']['nearbySoldPropertiesUrl'];
+                // Ensure absolute URL
+                if (strpos($soldUrl, 'http') === 0) {
+                    $details['sold_link'] = $soldUrl;
+                } else {
+                    $details['sold_link'] = 'https://www.rightmove.co.uk' . $soldUrl;
+                }
+            }
+
+            // Facilities (Parking, Garden, Accessibility)
+            $details['parking'] = 'Ask agent';
+            $details['garden'] = 'No';
+            $details['accessibility'] = 'Ask agent';
+
+            // Check features object (Newer JSON)
+            if (isset($propertyData['features'])) {
+                if (!empty($propertyData['features']['parking'])) $details['parking'] = 'Yes'; // Only says Yes if array not empty? Or specific values? usually array of strings
+                if (!empty($propertyData['features']['garden'])) $details['garden'] = 'Yes';
+                if (!empty($propertyData['features']['accessibility'])) $details['accessibility'] = 'Yes';
+            }
+
+            // Parse key features for more details if defaults
+            if (!empty($details['key_features'])) {
+                foreach ($details['key_features'] as $feature) {
+                    $f = strtolower($feature);
+                    if ($details['parking'] === 'Ask agent' && (strpos($f, 'parking') !== false || strpos($f, 'garage') !== false)) {
+                        $details['parking'] = $feature;
+                    }
+                    if ($details['garden'] === 'No' && (strpos($f, 'garden') !== false || strpos($f, 'terrace') !== false || strpos($f, 'backyard') !== false)) {
+                        $details['garden'] = 'Yes';
+                    }
+                    if ($details['accessibility'] === 'Ask agent' && (strpos($f, 'wheelchair') !== false || strpos($f, 'accessible') !== false || strpos($f, 'lift') !== false)) {
+                        $details['accessibility'] = $feature;
+                    }
+                }
             }
             
         } catch (\Exception $e) {
@@ -368,5 +486,75 @@ class InternalPropertyService
         }
         
         return $details;
+    }
+
+    /**
+     * Scrape sold property data from a Rightmove House Prices URL
+     * 
+     * @param string $url The sold prices URL
+     * @param int|string $linkPropertyId The ID of the main property this is linked to (for logging/association)
+     * @return array Array of sold properties found
+     */
+    public function scrapeSoldProperties($url, $linkPropertyId = null)
+    {
+        try {
+            Log::info("Scraping sold properties from: {$url}");
+            
+            $response = $this->client->request('GET', $url);
+            $html = $response->getBody()->getContents();
+            
+            // Try to find JSON model first
+            $jsonData = $this->parseJsonData($html);
+            $soldProperties = [];
+
+            if ($jsonData) {
+                 // Rightmove Sold Prices JSON structure
+                 // Usually under 'results' or 'properties'
+                 $results = $jsonData['results'] ?? $jsonData['properties'] ?? [];
+                 
+                 foreach ($results as $result) {
+                     $soldProp = [
+                         'property_id' => $result['id'] ?? null, // The sold property's ID
+                         'location' => $result['address'] ?? '',
+                         'property_type' => $result['propertyType'] ?? '',
+                         'bedrooms' => $result['bedrooms'] ?? '',
+                         'bathrooms' => $result['bathrooms'] ?? '',
+                         'tenure' => $result['tenure'] ?? '',
+                         'transactions' => []
+                     ];
+
+                     // Transactions (Sold History)
+                     if (isset($result['transactions'])) {
+                         foreach ($result['transactions'] as $trans) {
+                             $soldProp['transactions'][] = [
+                                 'price' => $trans['displayPrice'] ?? $trans['price'] ?? '',
+                                 'date' => $trans['dateSold'] ?? ''
+                             ];
+                         }
+                     }
+                     
+                     $soldProperties[] = $soldProp;
+                 }
+            } else {
+                // Fallback to DOM crawling if JSON fails
+                $crawler = new Crawler($html);
+                
+                // This selector logic depends on the actual House Prices page structure
+                // Assuming standard Rightmove list structure
+                // .sold-property-result is a guess, usually they are in blocks
+                
+                // Note: Rightmove House Prices pages use React/Next.js so JSON is almost always present.
+                // If scraping fails, it might be due to selectors. 
+                // Let's rely on JSON extraction which we already have helper for.
+                Log::warning("Could not extract JSON from Sold Prices page: {$url}");
+            }
+
+            Log::info("Found " . count($soldProperties) . " sold properties history.");
+            return $soldProperties;
+
+        } catch (\Exception $e) {
+            Log::error("Error scraping sold properties: " . $e->getMessage());
+            return [];
+        }
     }
 }

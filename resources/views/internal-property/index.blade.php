@@ -938,6 +938,8 @@
         let currentImageIndexes = {};
         let propertyUrls = [];
         let loadedProperties = [];
+        let currentPage = 1;
+        const itemsPerPage = 9; // Show 9 items per page
 
         // Elements
         const syncBtn = document.getElementById('syncBtn');
@@ -955,27 +957,41 @@
 
         // Import button handler
         syncBtn.addEventListener('click', async () => {
-            await importAllProperties();
+            await importAllProperties(true);
+        });
+
+        // Load properties on startup
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Check if we have a search context or if we want to load global properties
+            // For now, let's always try to load existing properties
+            await importAllProperties(false);
         });
 
         // Import all properties with OPTIMIZED concurrent progressive loading
-        async function importAllProperties() {
+        async function importAllProperties(isImport = true) {
             try {
-                // Hide empty state
-                emptyState.classList.remove('active');
+                // Hide empty state if we are importing, or if loading starts
+                if (isImport) {
+                    emptyState.classList.remove('active');
+                }
+                
                 successAlert.classList.remove('active');
                 errorAlert.classList.remove('active');
                 
                 // Show loading
                 loading.classList.add('active');
-                syncBtn.disabled = true;
+                if (isImport) {
+                    syncBtn.disabled = true;
+                }
 
-                // Fetch all property URLs (instant if cached)
-                showAlert('success', 'Importing property URLs...');
+                // Fetch all property URLs (instant if cached/in DB)
+                if (isImport) {
+                    showAlert('success', 'Importing property URLs...');
+                }
                 
                 const url = window.searchContext 
-                    ? `/api/internal-property/fetch-urls?search_id=${window.searchContext.id}&import=true` 
-                    : '/api/internal-property/fetch-urls?import=true';
+                    ? `/api/internal-property/fetch-urls?search_id=${window.searchContext.id}&import=${isImport}` 
+                    : `/api/internal-property/fetch-urls?import=${isImport}`;
                 
                 const urlsResponse = await fetch(url);
                 
@@ -986,12 +1002,31 @@
                 const urlsData = await urlsResponse.json();
 
                 if (!urlsData.success || !urlsData.urls || urlsData.urls.length === 0) {
-                    throw new Error(urlsData.message || urlsData.hint || 'No property URLs found');
+                    if (isImport) {
+                        throw new Error(urlsData.message || urlsData.hint || 'No property URLs found');
+                    } else {
+                        // If just loading on start and nothing found, just stop loading and show empty state
+                        loading.classList.remove('active');
+                        emptyState.classList.add('active'); // Ensure empty state is visible
+                        return; // Exit silently
+                    }
                 }
                 
+                // Hide empty state now that we have data
+                emptyState.classList.remove('active');
+
                 // Show cache status if available
-                if (urlsData.cached) {
-                    showAlert('success', `Loaded ${urlsData.urls.length} properties from cache`);
+                if (urlsData.source === 'database') {
+                     // Silent success for DB load on start (or maybe a small toast?)
+                     // If import was clicked, showing "Loaded from database" is fine too, 
+                     // but usually 'import' implies fetching fresh. 
+                     // But controller logic only returns DB if import=false. 
+                     // So if we are here, isImport=false implies we loaded from DB.
+                     if (isImport) {
+                         showAlert('success', `Loaded ${urlsData.urls.length} properties from database`);
+                     } else {
+                         console.log(`Loaded ${urlsData.urls.length} properties from database`);
+                     }
                 } else {
                     showAlert('success', `Imported ${urlsData.urls.length} properties`);
                 }
@@ -1022,14 +1057,19 @@
 
                 displayProperties(loadedProperties);
                 loading.classList.remove('active');
-                showAlert('success', `Showing ${loadedProperties.length} properties. Loading details...`);
+                
+                if (isImport) {
+                    showAlert('success', `Showing ${loadedProperties.length} properties. Loading details...`);
+                }
 
                 // Load details with CONCURRENT batching for MAXIMUM SPEED
                 await loadDetailsConcurrently(propertyUrls);
 
             } catch (error) {
                 console.error('Error importing properties:', error);
-                showAlert('error', error.message || 'An error occurred while importing properties');
+                if (isImport) {
+                   showAlert('error', error.message || 'An error occurred while importing properties');
+                }
                 emptyState.classList.add('active');
                 loading.classList.remove('active');
                 syncBtn.disabled = false;
@@ -1130,15 +1170,24 @@
             }
         }
 
-        // Display properties in grid
+        // Display properties in grid with pagination
         function displayProperties(props) {
-            propertiesGrid.innerHTML = props.map((property, index) => {
+            // Calculate slice for current page
+            const startIndex = (currentPage - 1) * itemsPerPage;
+            const endIndex = startIndex + itemsPerPage;
+            const pageProps = props.slice(startIndex, endIndex);
+
+            // Render current page items
+            propertiesGrid.innerHTML = pageProps.map((property, index) => {
                 currentImageIndexes[property.id] = 0;
                 return createPropertyCard(property, index);
             }).join('');
 
+            // Render pagination controls
+            renderPagination(props.length);
+
             // Add event listeners for image navigation
-            props.forEach(property => {
+            pageProps.forEach(property => {
                 const prevBtn = document.getElementById(`prev-${property.id}`);
                 const nextBtn = document.getElementById(`next-${property.id}`);
 
@@ -1164,6 +1213,133 @@
                     });
                 }
             });
+        }
+
+        // Render pagination controls
+        function renderPagination(totalItems) {
+            const totalPages = Math.ceil(totalItems / itemsPerPage);
+            if (totalPages <= 1) {
+                // Remove pagination if exists
+                const existingNav = document.getElementById('paginationNav');
+                if (existingNav) existingNav.remove();
+                return;
+            }
+
+            let paginationNav = document.getElementById('paginationNav');
+            if (!paginationNav) {
+                paginationNav = document.createElement('div');
+                paginationNav.id = 'paginationNav';
+                paginationNav.className = 'pagination-nav';
+                // Insert after properties grid
+                propertiesGrid.parentNode.insertBefore(paginationNav, propertiesGrid.nextSibling);
+
+                // Add pagination styles if not present
+                if (!document.getElementById('paginationStyles')) {
+                    const style = document.createElement('style');
+                    style.id = 'paginationStyles';
+                    style.textContent = `
+                        .pagination-nav {
+                            display: flex;
+                            justify-content: center;
+                            align-items: center;
+                            gap: 1rem;
+                            margin: 2rem 0;
+                            padding: 1rem;
+                            background: var(--card-bg);
+                            border-radius: 8px;
+                            box-shadow: var(--shadow-sm);
+                        }
+                        .page-btn {
+                            padding: 0.5rem 1rem;
+                            border: 1px solid var(--card-border);
+                            background: white;
+                            border-radius: 4px;
+                            cursor: pointer;
+                            font-weight: 500;
+                            transition: all 0.2s;
+                        }
+                        .page-btn:hover:not(:disabled) {
+                            background: var(--primary-light);
+                            border-color: var(--primary);
+                            color: var(--primary);
+                        }
+                        .page-btn:disabled {
+                            opacity: 0.5;
+                            cursor: not-allowed;
+                        }
+                        .page-info {
+                            font-size: 0.9rem;
+                            color: var(--text-secondary);
+                            font-weight: 500;
+                        }
+                        .page-controls {
+                            display: flex;
+                            align-items: center;
+                            gap: 1rem;
+                        }
+                        .goto-page {
+                            display: flex;
+                            align-items: center;
+                            gap: 0.5rem;
+                        }
+                        .goto-input {
+                            width: 60px;
+                            padding: 0.4rem;
+                            border: 1px solid var(--card-border);
+                            border-radius: 4px;
+                            text-align: center;
+                        }
+                        .page-btn.small {
+                            padding: 0.4rem 0.8rem;
+                            font-size: 0.8rem;
+                        }
+                    `;
+                    document.head.appendChild(style);
+                }
+            }
+
+            paginationNav.innerHTML = `
+                <button class="page-btn" onclick="changePage(-1)" ${currentPage === 1 ? 'disabled' : ''}>Previous</button>
+                <div class="page-controls">
+                    <span class="page-info">Page ${currentPage} of ${totalPages}</span>
+                    <div class="goto-page">
+                        <input type="number" min="1" max="${totalPages}" value="${currentPage}" 
+                               class="goto-input" onchange="goToPage(this.value)" 
+                               onkeydown="if(event.key === 'Enter') goToPage(this.value)">
+                        <button class="page-btn small" onclick="goToPage(this.previousElementSibling.value)">Go</button>
+                    </div>
+                </div>
+                <button class="page-btn" onclick="changePage(1)" ${currentPage === totalPages ? 'disabled' : ''}>Next</button>
+            `;
+        }
+
+        // Go to specific page
+        function goToPage(page) {
+            page = parseInt(page);
+            const totalPages = Math.ceil(loadedProperties.length / itemsPerPage);
+            
+            if (page >= 1 && page <= totalPages) {
+                currentPage = page;
+                displayProperties(loadedProperties);
+                document.getElementById('header')?.scrollIntoView({ behavior: 'smooth' });
+            } else {
+                // Reset input to current page if invalid
+                const input = document.querySelector('.goto-input');
+                if (input) input.value = currentPage;
+                showAlert('error', `Please enter a page between 1 and ${totalPages}`);
+            }
+        }
+
+        // Change page
+        function changePage(direction) {
+            const totalPages = Math.ceil(loadedProperties.length / itemsPerPage);
+            const newPage = currentPage + direction;
+
+            if (newPage >= 1 && newPage <= totalPages) {
+                currentPage = newPage;
+                displayProperties(loadedProperties);
+                document.getElementById('header')?.scrollIntoView({ behavior: 'smooth' });
+            }
         }
 
         // Create property card HTML - matches screenshot design exactly

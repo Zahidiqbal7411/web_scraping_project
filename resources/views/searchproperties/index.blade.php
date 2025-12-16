@@ -1176,6 +1176,7 @@
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
+                                'Accept': 'application/json',
                                 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
                             },
                             body: JSON.stringify({ area: cleanNameForLookup })
@@ -1244,6 +1245,7 @@
                     method: method,
                     headers: {
                         'Content-Type': 'application/json',
+                        'Accept': 'application/json',
                         'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
                     },
                     body: JSON.stringify({ 
@@ -1274,7 +1276,11 @@
             searchesBody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:2rem;">Loading...</td></tr>';
 
             try {
-                const response = await fetch('/api/saved-searches');
+                const response = await fetch('/api/saved-searches', {
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
                 const data = await response.json();
 
                 if (data.success && data.searches) {
@@ -1439,6 +1445,7 @@
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
+                        'Accept': 'application/json',
                         'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
                     },
                     body: JSON.stringify({ updates_url: newUrl })

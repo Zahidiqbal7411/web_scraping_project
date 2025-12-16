@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('urls', function (Blueprint $table) {
             $table->id();
             $table->text('url');
-            $table->unsignedBigInteger('filter_id');
+            $table->unsignedBigInteger('filter_id')->nullable();
             $table->foreign('filter_id')->references('id')->on('saved_searches')->onDelete('cascade');
             $table->timestamps();
         });

@@ -12,4 +12,7 @@ class Url extends Model
     {
         return $this->belongsTo(SavedSearch::class, 'filter_id');
     }
+    
+   
 }
+

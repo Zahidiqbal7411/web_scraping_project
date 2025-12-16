@@ -4,17 +4,22 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Services\InternalPropertyService;
+use App\Services\RightmoveScraperService;
 use App\Models\SavedSearch;
 use App\Models\Url;
+use App\Models\PropertySold;
+use App\Models\PropertySoldPrice;
 use Illuminate\Support\Facades\Log;
 
 class InternalPropertyController extends Controller
 {
     private $propertyService;
+    private $scraperService;
 
-    public function __construct(InternalPropertyService $propertyService)
+    public function __construct(InternalPropertyService $propertyService, RightmoveScraperService $scraperService)
     {
         $this->propertyService = $propertyService;
+        $this->scraperService = $scraperService;
     }
 
     /**
@@ -48,33 +53,9 @@ class InternalPropertyController extends Controller
             $page = $request->input('page', 1);
             $perPage = $request->input('per_page', 100);
             
-            // Check cache first
-            $cacheKey = 'property_urls_list';
-            $cached = \Cache::get($cacheKey);
-            
-            if ($cached && isset($cached['urls']) && count($cached['urls']) > 0) {
-                $allUrls = $cached['urls'];
-                $total = count($allUrls);
-                
-                // Calculate pagination
-                $offset = ($page - 1) * $perPage;
-                $urlsPage = array_slice($allUrls, $offset, $perPage);
-                
-                Log::info("Returning page {$page} with " . count($urlsPage) . " URLs from cache");
-                
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Property URLs loaded from cache',
-                    'urls' => $urlsPage,
-                    'pagination' => [
-                        'current_page' => $page,
-                        'per_page' => $perPage,
-                        'total' => $total,
-                        'total_pages' => ceil($total / $perPage),
-                        'has_more' => $offset + $perPage < $total
-                    ],
-                    'cached' => true
-                ]);
+            // Cache check removed
+            if (false) { // Disabled cache block
+                // Original cache logic removed
             }
             
             // If no cache and page 1, trigger URL fetch
@@ -87,8 +68,8 @@ class InternalPropertyController extends Controller
                 $data = $response->getData(true);
                 
                 if ($data['success'] && isset($data['urls']) && count($data['urls']) > 0) {
-                    // Cache the result
-                    \Cache::put($cacheKey, $data, 1800);
+                    // Cache removed
+                    // \Cache::put($cacheKey, $data, 1800);
                     
                     $allUrls = $data['urls'];
                     $total = count($allUrls);
@@ -145,13 +126,50 @@ class InternalPropertyController extends Controller
     {
         try {
             $searchId = $request->input('search_id');
-            $import = $request->input('import');
+            $import = $request->input('import') === 'true' || $request->input('import') === true;
             
-            // Generate cache key based on search context
-            $cacheKey = $searchId ? "property_urls_search_{$searchId}" : 'property_urls_list';
+            // Cache key removed
+            // $cacheKey = $searchId ? "property_urls_search_{$searchId}" : 'property_urls_list';
             
-            // IF NOT IMPORT: Check cache first (30 minutes TTL)
+            // IF NOT IMPORT: Check DB first, then cache
             if (!$import) {
+                Log::info("fetchUrls: Checking DB for search_id: " . ($searchId ?? 'null'));
+                
+                // Check Database
+                $query = Url::query();
+                if ($searchId) {
+                    $search = SavedSearch::find($searchId);
+                    // Filter by filter_id matches search_id
+                   $query->where('filter_id', $searchId);
+                }
+                
+                $dbUrls = $query->get(); 
+                Log::info("fetchUrls: DB query found " . $dbUrls->count() . " records.");
+                
+                if ($dbUrls->count() > 0) {
+                     Log::info("Returning " . $dbUrls->count() . " URLs from DATABASE");
+                     
+                     // Format to match Scraper response
+                     $formattedUrls = $dbUrls->map(function($url) {
+                        return [
+                            'url' => $url->url,
+                            'id' => null, // We might not have ID stored in 'urls' table, but we can try to extract or join with 'properties' table if needed
+                            // Ideally, we should join with 'properties' table to get more info if available
+                        ]; 
+                     })->toArray();
+                     
+                     return response()->json([
+                        'success' => true,
+                        'message' => 'Property URLs loaded from database',
+                        'count' => count($formattedUrls),
+                        'urls' => $formattedUrls,
+                        'cached' => false,
+                        'source' => 'database'
+                    ]);
+                }
+
+                // If not in DB, cache check removed
+                /*
                 $cached = \Cache::get($cacheKey);
                 
                 if ($cached && isset($cached['urls']) && count($cached['urls']) > 0) {
@@ -165,9 +183,27 @@ class InternalPropertyController extends Controller
                         'cached_at' => $cached['cached_at'] ?? null
                     ]);
                 }
+                */
             }
             
-            Log::info("Fetching fresh URLs from PropertyController (Import: " . ($import ? 'Yes' : 'No') . ")");
+            // If explicit import OR no data found, proceed to fetch
+            
+            // If explicit import requested, we continue.
+            // If NOT import (just page load) and no data, we might want to return empty 
+            // instead of triggering a long scrape automatically?
+            // User requested: "when i import data... i donot further need to import directly... i want to show the imported data"
+            // So if checking DB failed, and it's NOT an import request, we should probably return empty so user sees "Empty State"
+            if (!$import) {
+                 return response()->json([
+                    'success' => true, // Success but empty
+                    'message' => 'No properties found in database.',
+                    'count' => 0,
+                    'urls' => [],
+                    'source' => 'database'
+                ]);
+            }
+
+            Log::info("Fetching fresh URLs from PropertyController (Import: Yes)");
             
             // If no cache or importing, fetch from PropertyController
             set_time_limit(600); // 10 minutes
@@ -178,9 +214,8 @@ class InternalPropertyController extends Controller
                 $search = SavedSearch::find($searchId);
                 if ($search && $search->updates_url) {
                     Log::info("Fetching URLs for Saved Search #{$searchId}: {$search->updates_url}");
-                    // If importing, only fetch the single page (false for $fetchAll)
-                    // Otherwise fetch all properties (true)
-                    $response = $propertyController->scrapeProperties($search->updates_url, !$import);
+                    // Always fetch all properties when searching/importing
+                    $response = $propertyController->scrapeProperties($search->updates_url, true);
                 } else {
                     // Fallback if search not found or no URL
                     $response = $propertyController->sync();
@@ -193,35 +228,60 @@ class InternalPropertyController extends Controller
             $data = $response->getData(true);
             
             if ($data['success'] && isset($data['urls']) && count($data['urls']) > 0) {
-                // Add cache timestamp
+                // Add cache timestamp (kept for info but not used for caching)
                 $data['cached_at'] = now()->toIso8601String();
                 
-                // Cache the successful result for 30 minutes
-                \Cache::put($cacheKey, $data, 1800);
-                Log::info("Cached " . count($data['urls']) . " URLs for future requests");
+                // Cache put removed
+                // \Cache::put($cacheKey, $data, 1800);
+                // Log::info("Cached " . count($data['urls']) . " URLs for future requests");
 
-                // SAVE TO DATABASE if search_id exists
-                if ($searchId) {
+                // SAVE TO DATABASE if search_id exists OR if importing
+                if ($searchId || $import) {
                     try {
-                        Log::info("Saving imported URLs to database for Filter ID: {$searchId}");
+                        // Validate filter_id existence
+                        $filterId = null;
+                        if ($searchId) {
+                            $exists = SavedSearch::where('id', $searchId)->exists();
+                            if ($exists) {
+                                $filterId = $searchId;
+                            } else {
+                                Log::warning("Saved Search ID {$searchId} not found. Saving as global import.");
+                            }
+                        }
+
+                        Log::info("Saving imported URLs to database. Filter ID: " . ($filterId ?? 'NULL'));
                         
-                        // Clear existing URLs for this filter
-                        Url::where('filter_id', $searchId)->delete();
-                        
-                        // Insert new URLs
-                        $recordsToInsert = [];
-                        foreach ($data['urls'] as $urlData) {
-                            $recordsToInsert[] = [
-                                'filter_id' => $searchId,
-                                'url' => $urlData['url'], // Assuming urlData['url'] exists
-                                'created_at' => now(),
-                                'updated_at' => now()
-                            ];
+                        // Only clear existing URLs and Properties if we have a specific filter context
+                        if ($filterId) {
+                            Log::info("Clearing old data for filter ID: {$filterId}");
+                            // Delete properties associated with this search
+                            \App\Models\Property::where('filter_id', $filterId)->delete();
+                            // Delete URLs associated with this search
+                            Url::where('filter_id', $filterId)->delete();
                         }
                         
-                        // Bulk put
+                        $recordsToInsert = [];
+                        foreach ($data['urls'] as $urlData) {
+                            $propertyUrl = $urlData['url'] ?? '';
+                            
+                            if ($propertyUrl) {
+                                // Prepare URL record
+                                $recordsToInsert[] = [
+                                    'filter_id' => $filterId,
+                                    'url' => $propertyUrl,
+                                    'created_at' => now(),
+                                    'updated_at' => now()
+                                ];
+                            }
+                        }
+                        
+                        // Bulk insert URLs
                         if (!empty($recordsToInsert)) {
-                            Url::insert($recordsToInsert);
+                            // Chunk inserts to avoid query size limits
+                            $chunks = array_chunk($recordsToInsert, 500);
+                            foreach ($chunks as $chunk) {
+                                Url::insert($chunk);
+                            }
                             Log::info("Saved " . count($recordsToInsert) . " URLs to database.");
                         }
                         
@@ -270,16 +330,135 @@ class InternalPropertyController extends Controller
             // Use the service's concurrent fetch method for MASSIVE speed improvement
             $result = $this->propertyService->fetchPropertiesConcurrently($urls);
             
+            // SAVE FETCHED PROPERTIES TO DATABASE
+            $savedCount = 0;
+            if ($result['processed'] > 0 && !empty($result['properties'])) {
+                foreach ($result['properties'] as $propData) {
+                    try {
+                        // Extract ID from URL if not present (fallback)
+                        $propId = null;
+                        if (preg_match('/properties\/(\d+)/', $propData['url'], $matches)) {
+                            $propId = $matches[1];
+                        }
+                        
+                        if ($propId) {
+                            $filterId = null; // Can we pass filter_id here? The batch request doesn't send it currently.
+                            // We can try to look it up from the URL table? Or assume global.
+                            // For now, save as global or try to find existing URL record.
+                            $existingUrl = Url::where('url', $propData['url'])->first();
+                            $filterId = $existingUrl ? $existingUrl->filter_id : null;
+
+                            // Update Property
+                            $property = \App\Models\Property::updateOrCreate(
+                                ['property_id' => $propId],
+                                [
+                                    'location' => $propData['address'] ?? '',
+                                    'price' => $propData['price'] ?? '',
+                                    'key_features' => json_encode($propData['key_features'] ?? []),
+                                    'description' => $propData['description'] ?? '', 
+                                    'sold_link' => $propData['sold_link'] ?? null,
+                                    'filter_id' => $filterId,
+                                    'bedrooms' => $propData['bedrooms'] ?? null,
+                                    'bathrooms' => $propData['bathrooms'] ?? null,
+                                    'property_type' => $propData['property_type'] ?? null,
+                                    'size' => $propData['size'] ?? null,
+                                    'tenure' => $propData['tenure'] ?? null,
+                                    'council_tax' => $propData['council_tax'] ?? null,
+                                    'parking' => $propData['parking'] ?? null,
+                                    'garden' => $propData['garden'] ?? null,
+                                    'accessibility' => $propData['accessibility'] ?? null,
+                                    'ground_rent' => $propData['ground_rent'] ?? null,
+                                    'annual_service_charge' => $propData['annual_service_charge'] ?? null,
+                                    'lease_length' => $propData['lease_length'] ?? null
+                                ]
+                            );
+                            
+                            // SCRAPE & SAVE SOLD HISTORY
+                            if (!empty($propData['sold_link'])) {
+                                Log::info("Found sold link for property {$propId}. Scraping history...");
+                                $soldData = $this->propertyService->scrapeSoldProperties($propData['sold_link'], $propId);
+                                
+                                if (!empty($soldData)) {
+                                    foreach ($soldData as $soldProp) {
+                                        // Save to properties_sold
+                                        // We treat 'property_id' in soldProp as the remote ID.
+                                        // We might want to link it to our local Main Property ID?
+                                        // For now, saving as standalone entity related to this context if implied.
+                                        // But wait, the schema we built has 'property_id' in properties_sold.
+                                        // Let's use the 'property_id' from the sold property itself if available (Rightmove ID).
+                                        
+                                        $soldRecord = PropertySold::create([
+                                            'property_id' => $soldProp['property_id'], // Remote ID of sold prop
+                                            'location' => $soldProp['location'],
+                                            'property_type' => $soldProp['property_type'],
+                                            'bedrooms' => $soldProp['bedrooms'],
+                                            'bathrooms' => $soldProp['bathrooms'],
+                                            'tenure' => $soldProp['tenure']
+                                        ]);
+                                        
+                                        // Save transactions
+                                        if (!empty($soldProp['transactions'])) {
+                                            foreach ($soldProp['transactions'] as $trans) {
+                                                PropertySoldPrice::create([
+                                                    'sold_property_id' => $soldRecord->id,
+                                                    'sold_price' => $trans['price'],
+                                                    'sold_date' => $trans['date']
+                                                ]);
+                                            }
+                                        }
+                                    }
+                                    Log::info("Saved " . count($soldData) . " sold history records for property {$propId}");
+                                }
+                            }
+                            
+                            // Update Images
+                            if (!empty($propData['images'])) {
+                                \App\Models\PropertyImage::where('property_id', $propId)->delete();
+                                $imagesToInsert = [];
+                                foreach ($propData['images'] as $imgUrl) {
+                                    if ($imgUrl) {
+                                        $imagesToInsert[] = [
+                                            'property_id' => $propId,
+                                            'image_link' => $imgUrl,
+                                            'created_at' => now(),
+                                            'updated_at' => now()
+                                        ];
+                                    }
+                                }
+                                if (!empty($imagesToInsert)) {
+                                    \App\Models\PropertyImage::insert($imagesToInsert);
+                                }
+                            }
+                            $savedCount++;
+                        }
+                    } catch (\Exception $e) {
+                         Log::error("Failed to save property {$propData['url']}: " . $e->getMessage());
+                    }
+                }
+                Log::info("Saved {$savedCount} properties to database during batch fetch.");
+            }
+            
             $endTime = microtime(true);
             $duration = round($endTime - $startTime, 2);
             
             Log::info("Concurrent batch fetch complete in {$duration}s. Processed: {$result['processed']}, Failed: {$result['failed']}");
+
+            // Remove description from response to reduce payload size as per user request
+            if (!empty($result['properties'])) {
+                foreach ($result['properties'] as &$prop) {
+                    unset($prop['description']);
+                    if (isset($prop['all_details']['description'])) {
+                        unset($prop['all_details']['description']);
+                    }
+                }
+            }
 
             return response()->json([
                 'success' => true,
                 'message' => "Fetched {$result['processed']} properties successfully in {$duration}s",
                 'total' => count($urls),
                 'processed' => $result['processed'],
+                'saved_to_db' => $savedCount,
                 'failed' => $result['failed'],
                 'duration' => $duration,
                 'properties' => $result['properties']
