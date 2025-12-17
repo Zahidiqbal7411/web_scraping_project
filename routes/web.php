@@ -38,11 +38,12 @@ Route::get('/api/properties/test', [PropertyController::class, 'test'])->name('p
 // Internal Property routes (require authentication)
 Route::middleware(['auth'])->group(function () {
     Route::get('/internal-properties', [InternalPropertyController::class, 'index'])->name('internal-property.index');
+    Route::get('/internal-properties/search/{id}', [InternalPropertyController::class, 'show'])->name('internal-property.show');
+    Route::get('/api/internal-property/load-from-db', [InternalPropertyController::class, 'loadPropertiesFromDatabase'])->name('internal-property.load-from-db');
     Route::get('/api/internal-property/fetch-urls', [InternalPropertyController::class, 'fetchUrls'])->name('internal-property.fetch-urls');
     Route::get('/api/internal-property/fetch-urls-paginated', [InternalPropertyController::class, 'fetchUrlsPaginated'])->name('internal-property.fetch-urls-paginated');
     Route::post('/api/internal-property/fetch-all', [InternalPropertyController::class, 'fetchAllProperties'])->name('internal-property.fetch-all');
     Route::post('/api/internal-property/sync', [InternalPropertyController::class, 'sync'])->name('internal-property.sync');
-    Route::get('/internal-properties/search/{id}', [InternalPropertyController::class, 'show'])->name('internal-property.show');
 });
 
 // Saved Search routes (require authentication)

@@ -217,13 +217,198 @@
             margin-bottom: 1.5rem;
         }
 
-        /* Properties Grid */
+        /* Properties Grid - 2 Columns (Requested) */
         .properties-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 1.5rem;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
             margin-bottom: 2rem;
+            overflow: hidden;
+            width: 100%;
+            max-width: 100%;
         }
+
+        /* Property Card - Split Layout */
+        .property-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            overflow: hidden;
+            transition: transform 0.2s, box-shadow 0.2s;
+            position: relative;
+            display: flex;
+            flex-direction: row;
+            align-items: stretch;
+            min-height: 400px;
+            max-width: 100%;
+            box-sizing: border-box;
+        }
+
+        /* Left Side: Property Details */
+        .property-main-content {
+            flex: 0 0 60%;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid var(--card-border);
+            min-width: 0;
+            max-width: 60%;
+            overflow: hidden;
+        }
+
+        /* Right Side: Sold History */
+        .property-sold-sidebar {
+            flex: 0 0 40%;
+            max-width: 40%;
+            background: #fafafa;
+            display: flex;
+            flex-direction: column;
+            border-left: 1px solid var(--card-border);
+            overflow: hidden;
+        }
+
+        .property-image-section {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 4/3; /* Taller image as requested */
+            overflow: hidden;
+            background: #f0f0f0;
+        }
+
+        .property-info-section {
+            padding: 1.5rem;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Sold Sidebar Styles */
+        .sold-sidebar-header {
+            padding: 1rem 1.5rem;
+            background: white;
+            border-bottom: 1px solid var(--card-border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .sold-sidebar-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .sold-list-container {
+            padding: 0.75rem;
+            overflow-y: auto;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            max-height: 500px;
+        }
+        
+        /* Sold Card Style for Sidebar */
+        .sold-item-card {
+            background: white;
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            padding: 0.75rem;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+        
+        /* Sold Property Info Section (TOP) */
+        .sold-property-info {
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            border-radius: 6px;
+            padding: 0.75rem;
+            margin-bottom: 0.75rem;
+        }
+        
+        .sold-property-type {
+            font-weight: 700;
+            font-size: 0.85rem;
+            color: var(--text-primary);
+            margin-bottom: 0.5rem;
+        }
+        
+        .sold-property-details {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.35rem;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+        
+        .sold-property-details span {
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+        
+        /* Sold Prices Section (BELOW) - scrollable if more than 3 */
+        .sold-prices-section {
+            border-top: 1px dashed var(--card-border);
+            padding-top: 0.5rem;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+        
+        .sold-prices-title {
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.35rem;
+        }
+        
+        .sold-history-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            padding: 0.25rem 0;
+            border-bottom: 1px dotted var(--card-border);
+        }
+        
+        .sold-history-row:last-child {
+            border-bottom: none;
+        }
+        
+        .sold-history-price {
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        /* Layout Overrides to fill screen but prevent overflow */
+        .main-content {
+            width: 100% !important;
+            max-width: calc(100vw - 260px) !important; /* Account for sidebar */
+            padding: 1rem !important;
+            margin: 0 !important;
+            box-sizing: border-box !important;
+            overflow-x: hidden !important;
+        }
+        
+        .container {
+            width: 100% !important;
+            max-width: 100% !important;
+            padding: 0 0.5rem !important;
+            margin: 0 !important;
+            box-sizing: border-box !important;
+            overflow: hidden !important;
+        }
+
+        /* Global fix for this page */
+        body {
+            overflow-x: hidden;
+        }
+        
+        /* Hide old sold styles if they conflict */
+        .sold-history-section { display: none; }
 
         /* Property Card */
         .property-card {
@@ -557,6 +742,138 @@
         .detail-item.skeleton .detail-value {
             color: var(--text-secondary);
             font-style: italic;
+        }
+
+        /* Layout Overrides to fill screen */
+        .main-content {
+            width: 100% !important;
+            padding: 1.5rem !important;
+            box-sizing: border-box !important;
+        }
+        
+        .container {
+            width: 100% !important;
+            max-width: 100% !important;
+            padding: 0 !important;
+            margin: 0 !important;
+        }
+
+        /* Sold Property History */
+        .sold-history-section {
+            margin-top: 1.5rem;
+            padding-top: 1.5rem;
+            border-top: 2px dashed var(--card-border);
+            background: #fafafa;
+            /* Removed negative margins to prevent horizontal scroll */
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .sold-history-title {
+            font-size: 0.9rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .sold-count-badge {
+            background: var(--secondary);
+            color: white;
+            font-size: 0.75rem;
+            padding: 0.15rem 0.5rem;
+            border-radius: 6px;
+            font-weight: 600;
+        }
+
+        .sold-properties-container {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            max-height: 400px;
+            overflow-y: auto;
+            padding-right: 0.5rem;
+            /* Ensure no horizontal scroll inside */
+            overflow-x: hidden;
+        }
+        
+        .sold-property-card {
+            background: white;
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            padding: 1rem;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            transition: all 0.2s;
+        }
+        
+        .sold-property-card:hover {
+            border-color: var(--secondary);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        .sold-property-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 0.75rem;
+        }
+        
+        .sold-property-type {
+            font-weight: 700;
+            color: var(--text-primary);
+            font-size: 0.95rem;
+        }
+        
+        .sold-property-price {
+            font-weight: 700;
+            color: var(--primary);
+            font-size: 1.1rem;
+        }
+
+        .sold-details-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.75rem;
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px dashed var(--card-border);
+        }
+        
+        /* Re-use detail-item styles but smaller */
+        .sold-details-grid .detail-label {
+            font-size: 0.65rem;
+        }
+        
+        .sold-details-grid .detail-value {
+            font-size: 0.8rem;
+        }
+        
+        .sold-transactions-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+        
+        .sold-transaction-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            padding: 0.25rem 0;
+            border-bottom: 1px dotted var(--card-border);
+        }
+        
+        .sold-transaction-item:last-child {
+            border-bottom: none;
+        }
+        
+        .sold-transaction-price {
+            font-weight: 600;
+            color: var(--text-primary);
         }
 
         /* Property URL */
@@ -962,36 +1279,94 @@
 
         // Load properties on startup
         document.addEventListener('DOMContentLoaded', async () => {
-            // Check if we have a search context or if we want to load global properties
-            // For now, let's always try to load existing properties
-            await importAllProperties(false);
+            // On page load, try to load complete property data from database
+            await loadFromDatabaseOnStartup();
         });
 
+        // Load full property data from database on page startup
+        async function loadFromDatabaseOnStartup() {
+            try {
+                loading.classList.add('active');
+                
+                // Call the new endpoint that returns complete property data from DB
+                const url = window.searchContext 
+                    ? `/api/internal-property/load-from-db?search_id=${window.searchContext.id}` 
+                    : `/api/internal-property/load-from-db`;
+                
+                console.log('Loading from DB, URL:', url);
+                
+                const response = await fetch(url, {
+                    method: 'GET',
+                    credentials: 'same-origin',
+                    headers: {
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                });
+                
+                console.log('Response status:', response.status);
+                
+                if (!response.ok) {
+                    const text = await response.text();
+                    console.error('Error response:', text.substring(0, 500));
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('Data received:', data.success, 'count:', data.count);
+                
+                loading.classList.remove('active');
+                
+                if (!data.success || !data.properties || data.properties.length === 0) {
+                    // No data in database - show empty state
+                    emptyState.classList.add('active');
+                    console.log('No properties in database. Click Import to fetch from source.');
+                    return;
+                }
+                
+                // We have data from database - display it directly!
+                console.log(`Loaded ${data.properties.length} complete properties from database`);
+                
+                emptyState.classList.remove('active');
+                statsBar.style.display = 'flex';
+                totalCount.textContent = data.properties.length;
+                loadedCount.textContent = data.properties.length; // All loaded!
+                
+                // Properties from DB are already complete - no loading state
+                loadedProperties = data.properties;
+                propertyUrls = data.properties.map(p => ({ url: p.url, id: p.id }));
+                
+                displayProperties(loadedProperties);
+                
+                showAlert('success', `Loaded ${data.properties.length} properties from database`);
+                
+            } catch (error) {
+                console.error('Error loading from database:', error);
+                loading.classList.remove('active');
+                emptyState.classList.add('active');
+            }
+        }
+
         // Import all properties with OPTIMIZED concurrent progressive loading
+        // This is called when user clicks the Import button
         async function importAllProperties(isImport = true) {
             try {
-                // Hide empty state if we are importing, or if loading starts
-                if (isImport) {
-                    emptyState.classList.remove('active');
-                }
+                // Hide empty state if we are importing
+                emptyState.classList.remove('active');
                 
                 successAlert.classList.remove('active');
                 errorAlert.classList.remove('active');
                 
                 // Show loading
                 loading.classList.add('active');
-                if (isImport) {
-                    syncBtn.disabled = true;
-                }
+                syncBtn.disabled = true;
 
-                // Fetch all property URLs (instant if cached/in DB)
-                if (isImport) {
-                    showAlert('success', 'Importing property URLs...');
-                }
+                showAlert('success', 'Importing property URLs from source website...');
                 
+                // Always fetch from source when importing (isImport=true)
                 const url = window.searchContext 
-                    ? `/api/internal-property/fetch-urls?search_id=${window.searchContext.id}&import=${isImport}` 
-                    : `/api/internal-property/fetch-urls?import=${isImport}`;
+                    ? `/api/internal-property/fetch-urls?search_id=${window.searchContext.id}&import=true` 
+                    : `/api/internal-property/fetch-urls?import=true`;
                 
                 const urlsResponse = await fetch(url);
                 
@@ -1002,34 +1377,13 @@
                 const urlsData = await urlsResponse.json();
 
                 if (!urlsData.success || !urlsData.urls || urlsData.urls.length === 0) {
-                    if (isImport) {
-                        throw new Error(urlsData.message || urlsData.hint || 'No property URLs found');
-                    } else {
-                        // If just loading on start and nothing found, just stop loading and show empty state
-                        loading.classList.remove('active');
-                        emptyState.classList.add('active'); // Ensure empty state is visible
-                        return; // Exit silently
-                    }
+                    throw new Error(urlsData.message || urlsData.hint || 'No property URLs found');
                 }
                 
                 // Hide empty state now that we have data
                 emptyState.classList.remove('active');
 
-                // Show cache status if available
-                if (urlsData.source === 'database') {
-                     // Silent success for DB load on start (or maybe a small toast?)
-                     // If import was clicked, showing "Loaded from database" is fine too, 
-                     // but usually 'import' implies fetching fresh. 
-                     // But controller logic only returns DB if import=false. 
-                     // So if we are here, isImport=false implies we loaded from DB.
-                     if (isImport) {
-                         showAlert('success', `Loaded ${urlsData.urls.length} properties from database`);
-                     } else {
-                         console.log(`Loaded ${urlsData.urls.length} properties from database`);
-                     }
-                } else {
-                    showAlert('success', `Imported ${urlsData.urls.length} properties`);
-                }
+                showAlert('success', `Imported ${urlsData.urls.length} property URLs. Loading details...`);
 
                 propertyUrls = urlsData.urls;
                 
@@ -1044,7 +1398,7 @@
                     url: urlData.url,
                     title: urlData.title || 'Property for sale',
                     price: urlData.price || 'Price on request',
-                    address: urlData.address || 'Bath, Somerset',
+                    address: urlData.address || 'Loading...',
                     property_type: '',
                     bedrooms: '',
                     bathrooms: '',
@@ -1058,18 +1412,15 @@
                 displayProperties(loadedProperties);
                 loading.classList.remove('active');
                 
-                if (isImport) {
-                    showAlert('success', `Showing ${loadedProperties.length} properties. Loading details...`);
-                }
+                showAlert('success', `Showing ${loadedProperties.length} properties. Fetching details from source...`);
 
                 // Load details with CONCURRENT batching for MAXIMUM SPEED
+                // This scrapes full property details from source website
                 await loadDetailsConcurrently(propertyUrls);
 
             } catch (error) {
                 console.error('Error importing properties:', error);
-                if (isImport) {
-                   showAlert('error', error.message || 'An error occurred while importing properties');
-                }
+                showAlert('error', error.message || 'An error occurred while importing properties');
                 emptyState.classList.add('active');
                 loading.classList.remove('active');
                 syncBtn.disabled = false;
@@ -1351,152 +1702,152 @@
             // Use first image or placeholder
             const mainImage = hasImages ? property.images[0] : `https://via.placeholder.com/600x400/e0e0e0/666666?text=Loading+Image`;
 
+            // Create property card HTML - Split Layout
             return `
                 <div class="property-card ${loadingClass}" id="card-${property.id}" style="animation-delay: ${index * 0.01}s;">
-                    <div class="property-image-section">
-                        <div class="image-slider-wrapper">
-                            <div class="image-slides" id="slides-${property.id}">
-                                ${hasImages ? 
-                                    property.images.map((img, idx) => `
-                                        <div class="image-slide ${idx === 0 ? 'active' : ''}">
-                                            <img src="${img}" alt="Property image" loading="lazy" onerror="this.src='https://via.placeholder.com/600x400/e0e0e0/666666?text=Image+Not+Found'">
-                                        </div>
-                                    `).join('') : 
-                                    `<div class="image-slide active">
-                                        <img src="${mainImage}" alt="Loading...">
-                                    </div>`
-                                }
+                    <!-- LEFT SIDE: Property Details -->
+                    <div class="property-main-content">
+                        <div class="property-image-section">
+                            <div class="image-slider-wrapper">
+                                <div class="image-slides" id="slides-${property.id}">
+                                    ${hasImages ? 
+                                        property.images.map((img, idx) => `
+                                            <div class="image-slide ${idx === 0 ? 'active' : ''}">
+                                                <img src="${img}" alt="Property image" loading="lazy" onerror="this.src='https://via.placeholder.com/600x400/e0e0e0/666666?text=Image+Not+Found'">
+                                            </div>
+                                        `).join('') : 
+                                        `<div class="image-slide active">
+                                            <img src="${mainImage}" alt="Loading...">
+                                        </div>`
+                                    }
+                                </div>
+                                ${hasImages && imageCount > 1 ? `
+                                    <button class="nav-arrow left" onclick="event.stopPropagation(); navigateSlide('${property.id}', -1, ${imageCount})">‹</button>
+                                    <button class="nav-arrow right" onclick="event.stopPropagation(); navigateSlide('${property.id}', 1, ${imageCount})">›</button>
+                                ` : ''}
                             </div>
-                            ${hasImages && imageCount > 1 ? `
-                                <button class="nav-arrow left" onclick="event.stopPropagation(); navigateSlide('${property.id}', -1, ${imageCount})">‹</button>
-                                <button class="nav-arrow right" onclick="event.stopPropagation(); navigateSlide('${property.id}', 1, ${imageCount})">›</button>
+                        </div>
+                        
+                        <div class="property-info-section">
+                            <h3 class="property-address-title">${property.address}</h3>
+                            <div class="property-url-wrapper" onclick="event.stopPropagation()">
+                                <div class="property-url-display" id="url-display-${property.id}">
+                                    <div class="property-url" title="${property.url}">
+                                        <a href="${property.url}" target="_blank" id="url-link-${property.id}">${property.url}</a>
+                                    </div>
+                                    <button class="url-edit-btn" onclick="toggleUrlEdit('${property.id}', '${property.url.replace(/'/g, "\\'")}')"
+                                            title="Edit URL">
+                                        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                                                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <div class="property-url-edit" id="url-edit-${property.id}">
+                                    <input type="text" id="url-input-${property.id}" value="${property.url}" placeholder="Enter URL">
+                                    <div class="url-edit-actions">
+                                        <button class="url-save-btn" onclick="saveUrl('${property.id}')">Save</button>
+                                        <button class="url-cancel-btn" onclick="cancelUrlEdit('${property.id}')">Cancel</button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="property-price-section">
+                                <span class="price-amount">${property.price}</span>
+                                ${property.reduced_on ? `<span class="info-icon" title="Price information">ⓘ</span>` : ''}
+                            </div>
+                            
+                            ${property.reduced_on ? `
+                                <div class="reduced-date">Reduced on ${property.reduced_on}</div>
                             ` : ''}
-                        </div>
-                    </div>
-                    
-                    <div class="property-info-section">
-                        <h3 class="property-address-title">${property.address}</h3>
-                        <div class="property-url-wrapper" onclick="event.stopPropagation()">
-                            <div class="property-url-display" id="url-display-${property.id}">
-                                <div class="property-url" title="${property.url}">
-                                    <a href="${property.url}" target="_blank" id="url-link-${property.id}">${property.url}</a>
-                                </div>
-                                <button class="url-edit-btn" onclick="toggleUrlEdit('${property.id}', '${property.url.replace(/'/g, "\\'")}')"
-                                        title="Edit URL">
-                                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
-                                              d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
-                                    </svg>
-                                </button>
-                            </div>
-                            <div class="property-url-edit" id="url-edit-${property.id}">
-                                <input type="text" id="url-input-${property.id}" value="${property.url}" placeholder="Enter URL">
-                                <div class="url-edit-actions">
-                                    <button class="url-save-btn" onclick="saveUrl('${property.id}')">Save</button>
-                                    <button class="url-cancel-btn" onclick="cancelUrlEdit('${property.id}')">Cancel</button>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="property-price-section">
-                            <span class="price-amount">${property.price}</span>
-                            ${property.reduced_on ? `<span class="info-icon" title="Price information">ⓘ</span>` : ''}
-                        </div>
-                        
-                        ${property.reduced_on ? `
-                            <div class="reduced-date">Reduced on ${property.reduced_on}</div>
-                        ` : ''}
-                        
-                        <div class="property-details-grid">
-                            ${property.property_type ? `
+                            
+                            <div class="property-details-grid">
                                 <div class="detail-item">
                                     <div class="detail-label">PROPERTY TYPE</div>
                                     <div class="detail-value">
-                                        <svg class="detail-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
-                                        </svg>
-                                        <span>${property.property_type}</span>
+                                        <span>${property.property_type || '-'}</span>
                                     </div>
                                 </div>
-                            ` : `
-                                <div class="detail-item skeleton">
-                                    <div class="detail-label">PROPERTY TYPE</div>
-                                    <div class="detail-value">Loading...</div>
-                                </div>
-                            `}
-                            
-                            ${property.bedrooms || !property.loading ? `
                                 <div class="detail-item">
                                     <div class="detail-label">BEDROOMS</div>
                                     <div class="detail-value">
-                                        <svg class="detail-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
-                                        </svg>
                                         <span>${property.bedrooms || '-'}</span>
                                     </div>
                                 </div>
-                            ` : `
-                                <div class="detail-item skeleton">
-                                    <div class="detail-label">BEDROOMS</div>
-                                    <div class="detail-value">Loading...</div>
-                                </div>
-                            `}
-                            
-                            ${property.bathrooms || !property.loading ? `
                                 <div class="detail-item">
                                     <div class="detail-label">BATHROOMS</div>
                                     <div class="detail-value">
-                                        <svg class="detail-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
-                                        </svg>
                                         <span>${property.bathrooms || '-'}</span>
                                     </div>
                                 </div>
-                            ` : `
-                                <div class="detail-item skeleton">
-                                    <div class="detail-label">BATHROOMS</div>
-                                    <div class="detail-value">Loading...</div>
-                                </div>
-                            `}
-                            
-                            ${property.size || !property.loading ? `
                                 <div class="detail-item">
                                     <div class="detail-label">SIZE</div>
                                     <div class="detail-value">
-                                        <svg class="detail-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path>
-                                        </svg>
                                         <span>${property.size || 'Ask agent'}</span>
                                     </div>
                                 </div>
-                            ` : `
-                                <div class="detail-item skeleton">
-                                    <div class="detail-label">SIZE</div>
-                                    <div class="detail-value">Loading...</div>
-                                </div>
-                            `}
-                            
-                            ${property.tenure || !property.loading ? `
                                 <div class="detail-item">
-                                    <div class="detail-label">TENURE <span class="info-icon">ⓘ</span></div>
+                                    <div class="detail-label">TENURE</div>
                                     <div class="detail-value">
                                         <span>${property.tenure || 'Freehold'}</span>
                                     </div>
                                 </div>
-                            ` : `
-                                <div class="detail-item skeleton">
-                                    <div class="detail-label">TENURE</div>
-                                    <div class="detail-value">Loading...</div>
-                                </div>
-                            `}
+                            </div>
+                            
+                            <a href="${property.url}" target="_blank" class="view-btn" onclick="event.stopPropagation()">
+                                <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                                </svg>
+                                View on Rightmove
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- RIGHT SIDE: Sold History Sidebar -->
+                    <div class="property-sold-sidebar">
+                        <div class="sold-sidebar-header">
+                            <div class="sold-sidebar-title">
+                                <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                Sold History (${property.sold_properties ? property.sold_properties.length : 0})
+                            </div>
                         </div>
                         
-                        <a href="${property.url}" target="_blank" class="view-btn" onclick="event.stopPropagation()">
-                            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
-                            </svg>
-                            View on Rightmove
-                        </a>
+                        <div class="sold-list-container">
+                            ${property.sold_properties && property.sold_properties.length > 0 ? 
+                                property.sold_properties.map(sold => {
+                                    return `
+                                    <div class="sold-item-card">
+                                        <!-- Property Details (TOP) -->
+                                        <div class="sold-property-info">
+                                            <div class="sold-property-type">${sold.property_type || 'Property'} (${sold.tenure || 'Unknown'})</div>
+                                            <div class="sold-property-details">
+                                                <span>🛏️ ${sold.bedrooms || '-'} Beds</span>
+                                                <span>🛁 ${sold.bathrooms || '-'} Baths</span>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- All Prices (BELOW) -->
+                                        ${sold.prices && sold.prices.length > 0 ? `
+                                            <div class="sold-prices-section">
+                                                <div class="sold-prices-title">Sale History</div>
+                                                ${sold.prices.map(price => `
+                                                    <div class="sold-history-row">
+                                                        <span>${price.sold_date || '-'}</span>
+                                                        <span class="sold-history-price">${price.sold_price || '-'}</span>
+                                                    </div>
+                                                `).join('')}
+                                            </div>
+                                        ` : `<div style="font-size:0.75rem; color:var(--text-secondary); font-style:italic;">No price data</div>`}
+                                    </div>
+                                    `;
+                                }).join('') 
+                            :   `<div style="color:var(--text-secondary); text-align:center; padding:2rem; font-style:italic;">
+                                    No sold history available
+                                </div>`
+                            }
+                        </div>
                     </div>
                 </div>
             `;

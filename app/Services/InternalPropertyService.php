@@ -226,6 +226,14 @@ class InternalPropertyService
                 'key_features' => $details['key_features'] ?? [],
                 'description' => $details['description'] ?? '',
                 'sold_link' => $details['sold_link'] ?? null,
+                // Extra details needed for database
+                'council_tax' => $details['council_tax'] ?? null,
+                'parking' => $details['parking'] ?? null,
+                'garden' => $details['garden'] ?? null,
+                'accessibility' => $details['accessibility'] ?? null,
+                'ground_rent' => $details['ground_rent'] ?? null,
+                'annual_service_charge' => $details['annual_service_charge'] ?? null,
+                'lease_length' => $details['lease_length'] ?? null,
                 'all_details' => $details
             ];
             
@@ -441,16 +449,39 @@ class InternalPropertyService
             // Extract Description and Key Features
             $details['description'] = $propertyData['text']['description'] ?? '';
             $details['key_features'] = $propertyData['keyFeatures'] ?? [];
+            
+            // Log empty fields for debugging
+            if (empty($details['description'])) {
+                Log::warning("Description is empty for property");
+            }
+            if (empty($details['key_features'])) {
+                Log::warning("Key features is empty for property");
+            }
 
-            // Extract Sold Link
+            // Extract Sold Link - check multiple paths
+            $soldUrl = null;
             if (isset($propertyData['propertyUrls']['nearbySoldPropertiesUrl'])) {
                 $soldUrl = $propertyData['propertyUrls']['nearbySoldPropertiesUrl'];
+            } elseif (isset($propertyData['soldNearby']['soldNearbyUrl'])) {
+                $soldUrl = $propertyData['soldNearby']['soldNearbyUrl'];
+            } elseif (isset($propertyData['address']['outcode'])) {
+                // Construct sold link from postcode
+                $outcode = strtolower($propertyData['address']['outcode']);
+                $incode = strtolower($propertyData['address']['incode'] ?? '');
+                $soldUrl = "/house-prices/{$outcode}" . ($incode ? "-{$incode}" : '') . ".html";
+                Log::info("Constructed sold link from postcode: {$soldUrl}");
+            }
+            
+            if ($soldUrl) {
                 // Ensure absolute URL
                 if (strpos($soldUrl, 'http') === 0) {
                     $details['sold_link'] = $soldUrl;
                 } else {
                     $details['sold_link'] = 'https://www.rightmove.co.uk' . $soldUrl;
                 }
+                Log::info("Found sold link: " . $details['sold_link']);
+            } else {
+                Log::warning("No sold link could be determined for property");
             }
 
             // Facilities (Parking, Garden, Accessibility)
@@ -509,47 +540,85 @@ class InternalPropertyService
 
             if ($jsonData) {
                  // Rightmove Sold Prices JSON structure
-                 // Usually under 'results' or 'properties'
-                 $results = $jsonData['results'] ?? $jsonData['properties'] ?? [];
+                 // Current structure (Dec 2024): searchResult.properties
+                 // Each property has: uuid, address, propertyType, bedrooms, bathrooms, transactions[]
+                 
+                 $results = [];
+                 
+                 // Try different JSON paths
+                 if (isset($jsonData['searchResult']['properties'])) {
+                     $results = $jsonData['searchResult']['properties'];
+                     Log::info("Found sold data in searchResult.properties");
+                 } elseif (isset($jsonData['propertyData']['soldPricesData']['properties'])) {
+                     $results = $jsonData['propertyData']['soldPricesData']['properties'];
+                     Log::info("Found sold data in propertyData.soldPricesData.properties");
+                 } elseif (isset($jsonData['props']['pageProps']['results'])) {
+                     $results = $jsonData['props']['pageProps']['results'];
+                     Log::info("Found sold data in props.pageProps.results");
+                 } elseif (isset($jsonData['props']['pageProps']['properties'])) {
+                     $results = $jsonData['props']['pageProps']['properties'];
+                     Log::info("Found sold data in props.pageProps.properties");
+                 } elseif (isset($jsonData['results'])) {
+                     $results = $jsonData['results'];
+                     Log::info("Found sold data in results");
+                 } elseif (isset($jsonData['properties'])) {
+                     $results = $jsonData['properties'];
+                     Log::info("Found sold data in properties");
+                 } else {
+                     Log::warning("Could not find sold properties in any known JSON path");
+                     Log::warning("Available top-level keys: " . implode(', ', array_keys($jsonData)));
+                 }
                  
                  foreach ($results as $result) {
+                     // Use the main property ID (linkPropertyId) passed from controller 
+                     // This ensures properties_sold uses the same property_id as the properties table
+                     $propertyId = $linkPropertyId ?? $result['uuid'] ?? $result['id'] ?? $result['propertyId'] ?? $result['encryptedUprn'] ?? uniqid('sold_');
+                     
+                     // Get tenure from latest transaction if not at top level
+                     $tenure = $result['tenure'] ?? '';
+                     if (empty($tenure) && isset($result['latestTransaction']['tenure'])) {
+                         $tenure = $result['latestTransaction']['tenure'];
+                     }
+                     
                      $soldProp = [
-                         'property_id' => $result['id'] ?? null, // The sold property's ID
-                         'location' => $result['address'] ?? '',
-                         'property_type' => $result['propertyType'] ?? '',
-                         'bedrooms' => $result['bedrooms'] ?? '',
-                         'bathrooms' => $result['bathrooms'] ?? '',
-                         'tenure' => $result['tenure'] ?? '',
+                         'property_id' => $propertyId,
+                         'location' => $result['address'] ?? $result['displayAddress'] ?? '',
+                         'property_type' => $result['propertyType'] ?? $result['propertySubType'] ?? '',
+                         'bedrooms' => $result['bedrooms'] ?? null,
+                         'bathrooms' => $result['bathrooms'] ?? null,
+                         'tenure' => $tenure,
                          'transactions' => []
                      ];
+                     
+                     Log::info("Processing sold property: " . $propertyId . " at " . $soldProp['location']);
 
-                     // Transactions (Sold History)
-                     if (isset($result['transactions'])) {
-                         foreach ($result['transactions'] as $trans) {
+                     // Transactions (Sold History) - check multiple possible field names
+                     $transactions = $result['transactions'] ?? $result['soldPrices'] ?? $result['priceHistory'] ?? [];
+                     
+                     if (!empty($transactions)) {
+                         foreach ($transactions as $trans) {
                              $soldProp['transactions'][] = [
-                                 'price' => $trans['displayPrice'] ?? $trans['price'] ?? '',
-                                 'date' => $trans['dateSold'] ?? ''
+                                 'price' => $trans['displayPrice'] ?? $trans['price'] ?? $trans['soldPrice'] ?? '',
+                                 'date' => $trans['dateSold'] ?? $trans['soldDate'] ?? $trans['date'] ?? ''
                              ];
                          }
                      }
                      
-                     $soldProperties[] = $soldProp;
+                     // Only add if we have valid data
+                     if ($soldProp['property_id'] || $soldProp['location']) {
+                         $soldProperties[] = $soldProp;
+                     }
                  }
             } else {
                 // Fallback to DOM crawling if JSON fails
                 $crawler = new Crawler($html);
                 
-                // This selector logic depends on the actual House Prices page structure
-                // Assuming standard Rightmove list structure
-                // .sold-property-result is a guess, usually they are in blocks
-                
                 // Note: Rightmove House Prices pages use React/Next.js so JSON is almost always present.
                 // If scraping fails, it might be due to selectors. 
-                // Let's rely on JSON extraction which we already have helper for.
                 Log::warning("Could not extract JSON from Sold Prices page: {$url}");
             }
 
-            Log::info("Found " . count($soldProperties) . " sold properties history.");
+            Log::info("Found " . count($soldProperties) . " sold properties with history.");
             return $soldProperties;
 
         } catch (\Exception $e) {

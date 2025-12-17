@@ -1,0 +1,320 @@
+{
+    "isAuthenticated": false,
+    "metadata": {
+        "publicsiteUrl": "\/\/www.rightmove.co.uk",
+        "mediaServerUrl": "https:\/\/media.rightmove.co.uk",
+        "serverTimestamp": 1765956397611,
+        "deviceType": "desktop",
+        "deviceTypeForLazyLoad": "desktop",
+        "featureSwitches": {
+            "SoldPropertyWeb.SHOW_MORTGAGES_WIDGET": true,
+            "SoldPropertyWeb.SHOW_CX_CAVEAT": false,
+            "GlobalSwitches.COOKIE_BANNER_IN_APP_ENABLED": true,
+            "GlobalSwitches.MANAGE_RMSESSIONID_ENABLED": true,
+            "SoldPropertyWeb.APPLICATION_MANAGE_RMSESSIONID_ENABLED": false,
+            "SoldPropertyWeb.ENABLED_SCRAPING_INTERCEPTOR": false,
+            "SoldPropertyWeb.ENABLE_PUBLIFT_THIRD_PARTY_ADS": true,
+            "HousePricesFeatureSwitches.USE_UPRN_BASED_INDEX": true,
+            "SoldPropertyWeb.ENABLED_VWO": true,
+            "SoldPropertyWeb.EXTENDED_RESI_OUTCODE_LIST": true,
+            "CookieBarSwitches.BLOCK_UNKNOWN_COOKIES": false,
+            "CookieBarSwitches.BLOCK_UNKNOWN_COOKIES_V2": true,
+            "CookieBarSwitches.ENABLE_ONE_TRUST_COOKIE_SCRIPT": true,
+            "CookieBarSwitches.CLIENT_STORAGE_FILTERING_ENABLED": true
+        },
+        "mvts": [],
+        "correlationId": "c01db3a8-0e41-4794-807b-8c6dbce50e41",
+        "locationSearchUrl": "https:\/\/los.rightmove.co.uk",
+        "shouldRenderPartialPage": false,
+        "rumTransactionSampleRate": 0.01,
+        "environment": "production",
+        "publiftAdsConfig": "PROD"
+    },
+    "searchResult": {
+        "count": 3,
+        "metaTagDescription": "Sold House Prices in NW1 4QP. Explore Rightmove house prices to find out how much properties sold for in NW1 4QP.",
+        "properties": [
+            {
+                "uuid": "ff9ba0c4-c6a1-4609-b86f-8645f354a84e",
+                "encryptedUprn": "vbOmgxyj3UPz4BlHCsrfx4Zt-wRw2a3UWzEX",
+                "address": "Carruthers House, Cornwall Terrace, London NW1 4QP",
+                "propertyType": "TERRACED",
+                "bedrooms": null,
+                "bathrooms": null,
+                "imageInfo": null,
+                "hasFloorPlan": false,
+                "transactions": [
+                    {
+                        "displayPrice": "\u00a33,627,000",
+                        "dateSold": "24 May 2011",
+                        "tenure": "LEASEHOLD",
+                        "newBuild": false
+                    }
+                ],
+                "latestTransaction": {
+                    "displayPrice": "\u00a33,627,000",
+                    "dateSold": "24 May 2011",
+                    "tenure": "LEASEHOLD",
+                    "newBuild": false
+                },
+                "location": {
+                    "lat": 51.52405,
+                    "lng": -0.15726
+                },
+                "detailUrl": "https:\/\/www.rightmove.co.uk\/house-prices\/details\/ff9ba0c4-c6a1-4609-b86f-8645f354a84e",
+                "staticMapUrls": {
+                    "staticMapImgUrlMobile": "https:\/\/media.rightmove.co.uk\/map\/_generate?width=106&height=60&zoomLevel=15&latitude=51.52405&longitude=-0.15726&signature=cUGw9JlXq6Hb1UruvGmZl_eqrUA=",
+                    "staticMapImgUrlDesktop": "https:\/\/media.rightmove.co.uk\/map\/_generate?width=240&height=136&zoomLevel=15&latitude=51.52405&longitude=-0.15726&signature=5XfhD6qUCPOIbu1b4PvuZf62-AU=",
+                    "staticMapImgUrlApp": "https:\/\/media.rightmove.co.uk\/map\/_generate?width=516&height=250&zoomLevel=15&latitude=51.52405&longitude=-0.15726&signature=yHSXX155hsCoWdOaiJQkYrAqAD4="
+                }
+            },
+            {
+                "uuid": "57ad05cd-66d3-48c3-9855-03685e758101",
+                "encryptedUprn": "6xHgWt9bEHPhIrNlKlAjMCFosHbHZVn70QJE",
+                "address": "11 Silk House, Cornwall Terrace, London NW1 4QP",
+                "propertyType": "TERRACED",
+                "bedrooms": 6,
+                "bathrooms": 8,
+                "imageInfo": {
+                    "unsizedUrl": "https:\/\/media.rightmove.co.uk\/85k\/84235\/161600606\/84235_RGL240060_L_IMG_00_0000.jpeg",
+                    "imageUrl": "https:\/\/media.rightmove.co.uk\/dir\/85k\/84235\/161600606\/84235_RGL240060_L_IMG_00_0000_max_135x100.jpeg",
+                    "mediumImageUrl": "https:\/\/media.rightmove.co.uk\/dir\/85k\/84235\/161600606\/84235_RGL240060_L_IMG_00_0000_max_296x197.jpeg",
+                    "count": 17
+                },
+                "hasFloorPlan": true,
+                "transactions": [
+                    {
+                        "displayPrice": "\u00a3660,000",
+                        "dateSold": "16 Feb 1996",
+                        "tenure": "LEASEHOLD",
+                        "newBuild": false
+                    }
+                ],
+                "latestTransaction": {
+                    "displayPrice": "\u00a3660,000",
+                    "dateSold": "16 Feb 1996",
+                    "tenure": "LEASEHOLD",
+                    "newBuild": false
+                },
+                "location": {
+                    "lat": 51.52372,
+                    "lng": -0.15654
+                },
+                "detailUrl": "https:\/\/www.rightmove.co.uk\/house-prices\/details\/57ad05cd-66d3-48c3-9855-03685e758101",
+                "staticMapUrls": {
+                    "staticMapImgUrlMobile": "https:\/\/media.rightmove.co.uk\/map\/_generate?width=106&height=60&zoomLevel=15&latitude=51.52372&longitude=-0.15654&signature=tUb_kcAGK7yDrhkebT9lYkLurJU=",
+                    "staticMapImgUrlDesktop": "https:\/\/media.rightmove.co.uk\/map\/_generate?width=240&height=136&zoomLevel=15&latitude=51.52372&longitude=-0.15654&signature=p9bKFU8eDua7sjho5Bw9nI2XQQo=",
+                    "staticMapImgUrlApp": "https:\/\/media.rightmove.co.uk\/map\/_generate?width=516&height=250&zoomLevel=15&latitude=51.52372&longitude=-0.15654&signature=gbn8CRdQpj2oKN7Cl_ov4TWErbg="
+                }
+            },
+            {
+                "uuid": "d544101f-98a7-4991-a9d0-00f6b8659d2b",
+                "encryptedUprn": "erGZf2jREqSjGd5aW7hPABTgosZnuxqujVTf",
+                "address": "10 Pagent House, Cornwall Terrace, London NW1 4QP",
+                "propertyType": "DETACHED",
+                "bedrooms": 6,
+                "bathrooms": null,
+                "imageInfo": {
+                    "unsizedUrl": "https:\/\/media.rightmove.co.uk\/79k\/78202\/33509662\/78202_309757_IMG_00_0004.jpg",
+                    "imageUrl": "https:\/\/media.rightmove.co.uk\/dir\/79k\/78202\/33509662\/78202_309757_IMG_00_0004_max_135x100.jpg",
+                    "mediumImageUrl": "https:\/\/media.rightmove.co.uk\/dir\/79k\/78202\/33509662\/78202_309757_IMG_00_0004_max_296x197.jpg",
+                    "count": 10
+                },
+                "hasFloorPlan": false,
+                "transactions": [
+                    {
+                        "displayPrice": "\u00a3140,000",
+                        "dateSold": "16 Feb 1996",
+                        "tenure": "LEASEHOLD",
+                        "newBuild": false
+                    }
+                ],
+                "latestTransaction": {
+                    "displayPrice": "\u00a3140,000",
+                    "dateSold": "16 Feb 1996",
+                    "tenure": "LEASEHOLD",
+                    "newBuild": false
+                },
+                "location": {
+                    "lat": 51.52383,
+                    "lng": -0.15669
+                },
+                "detailUrl": "https:\/\/www.rightmove.co.uk\/house-prices\/details\/d544101f-98a7-4991-a9d0-00f6b8659d2b",
+                "staticMapUrls": {
+                    "staticMapImgUrlMobile": "https:\/\/media.rightmove.co.uk\/map\/_generate?width=106&height=60&zoomLevel=15&latitude=51.52383&longitude=-0.15669&signature=8eC9w2HU2jCVBGl6MiC5qNyBm8U=",
+                    "staticMapImgUrlDesktop": "https:\/\/media.rightmove.co.uk\/map\/_generate?width=240&height=136&zoomLevel=15&latitude=51.52383&longitude=-0.15669&signature=4BBpKuKbf0tAgEFlHTrZRy3Tsrc=",
+                    "staticMapImgUrlApp": "https:\/\/media.rightmove.co.uk\/map\/_generate?width=516&height=250&zoomLevel=15&latitude=51.52383&longitude=-0.15669&signature=oMdQjPW52_5lglK7skIiGvvPaVQ="
+                }
+            }
+        ],
+        "searchLocation": {
+            "displayName": "NW1 4QP",
+            "searchName": "NW1-4QP",
+            "locationType": "POSTCODE",
+            "locationId": 1176611,
+            "encryptedUsrn": null,
+            "outcodeId": null
+        },
+        "disclaimerDates": {
+            "disclaimerDatesMap": {
+                "landRegistry": {
+                    "earliestTransaction": "1 January 1995",
+                    "mostRecentTransaction": "31 October 2025",
+                    "lastLoadDate": "2 December 2025"
+                }
+            }
+        },
+        "blurb": {
+            "text": [],
+            "numberOfProperties": 3,
+            "numberOfTransactions": 3,
+            "earliestTransactionDate": "16 Feb 1996",
+            "latestTransactionDate": "24 May 2011"
+        },
+        "pagination": {
+            "current": 1,
+            "first": 1,
+            "last": 1,
+            "total": 3,
+            "sortBy": null,
+            "hasNext": false
+        },
+        "localInfo": {
+            "nearbyHousePriceLinks": {
+                "title": "House prices near NW1 4QP",
+                "links": [
+                    {
+                        "text": "House prices in SE1",
+                        "url": "\/house-prices\/se1.html"
+                    },
+                    {
+                        "text": "House prices in N1",
+                        "url": "\/house-prices\/n1.html"
+                    },
+                    {
+                        "text": "House prices in NW3",
+                        "url": "\/house-prices\/nw3.html"
+                    },
+                    {
+                        "text": "House prices in NW6",
+                        "url": "\/house-prices\/nw6.html"
+                    },
+                    {
+                        "text": "House prices in W2",
+                        "url": "\/house-prices\/w2.html"
+                    },
+                    {
+                        "text": "House prices in N16",
+                        "url": "\/house-prices\/n16.html"
+                    },
+                    {
+                        "text": "House prices in W1U",
+                        "url": "\/house-prices\/w1u.html"
+                    }
+                ]
+            },
+            "propertyValueLinks": {
+                "title": "What is your property worth?",
+                "links": [
+                    {
+                        "text": "Agent Property Valuation",
+                        "url": "\/agent-valuation"
+                    },
+                    {
+                        "text": "Instant Online Valuation",
+                        "url": "\/house-value.html?location=NW1+4QP"
+                    },
+                    {
+                        "text": "Estate agents in NW1 4QP",
+                        "url": "\/estate-agents\/find.html?locationIdentifier=POSTCODE^1176611"
+                    },
+                    {
+                        "text": "Properties for sale in NW1 4QP",
+                        "url": "\/property-for-sale\/find.html?locationIdentifier=POSTCODE^1176611"
+                    },
+                    {
+                        "text": "Properties to let in NW1 4QP",
+                        "url": "\/property-to-rent\/find.html?locationIdentifier=POSTCODE^1176611"
+                    },
+                    {
+                        "text": "Selling guide",
+                        "url": "\/resources\/property-guides\/selling-guide.html"
+                    },
+                    {
+                        "text": "Buying guide",
+                        "url": "\/resources\/property-guides\/buying-guide.html"
+                    },
+                    {
+                        "text": "House Price Index",
+                        "url": "\/news\/house-price-index"
+                    }
+                ]
+            }
+        },
+        "agents": [
+            {
+                "customerId": 15186101,
+                "branchId": 138794,
+                "name": "Belsize Park",
+                "displayAddress": "2C Englands Lane,\r\nLondon,\r\nNW3 4TG",
+                "logoUrl": "https:\/\/media.rightmove.co.uk\/company\/clogo_16112_0007.jpeg",
+                "tradingName": "Knight Frank",
+                "latitude": 51.54651241641975,
+                "longitude": -0.16165627354457668
+            },
+            {
+                "customerId": 7927517,
+                "branchId": 64127,
+                "name": "Camden",
+                "displayAddress": "120 Parkway,\r\nLondon,\r\nNW1 7AN",
+                "logoUrl": "https:\/\/media.rightmove.co.uk\/65k\/64127\/branch_logo_64127_0000.jpeg",
+                "tradingName": "Foxtons",
+                "latitude": 51.53735925936263,
+                "longitude": -0.1457309240018809
+            },
+            {
+                "customerId": 24059822,
+                "branchId": 222842,
+                "name": "Bank",
+                "displayAddress": "46 Cannon Street,\r\nLondon,\r\nEC4N 6JJ",
+                "logoUrl": "https:\/\/media.rightmove.co.uk\/ama\/branch-profile\/1756395874\/14d7c068-a594-410c-be89-ec61a26cdc74_max_135x135.png",
+                "tradingName": "The Chant Group",
+                "latitude": 51.51215112488317,
+                "longitude": -0.09343130858467187
+            },
+            {
+                "customerId": 12498,
+                "branchId": 11476,
+                "name": "Clerkenwell",
+                "displayAddress": "Ground Floor,\r\n67-71 Goswell Road,\r\nLondon,\r\nEC1V 7EP",
+                "logoUrl": "https:\/\/media.rightmove.co.uk\/brand\/brand_logo_5436_0001.jpeg",
+                "tradingName": "Felicity J Lord",
+                "latitude": 51.52448025421282,
+                "longitude": -0.0995475645730793
+            },
+            {
+                "customerId": 17161187,
+                "branchId": 157391,
+                "name": "Primrose Hill",
+                "displayAddress": "79 Regents Park Road,\r\nLondon,\r\nNW1 8UY",
+                "logoUrl": "https:\/\/media.rightmove.co.uk\/company\/clogo_14060_0001.jpeg",
+                "tradingName": "Savills",
+                "latitude": 51.54141200628175,
+                "longitude": -0.15753555226933605
+            },
+            {
+                "customerId": 7439319,
+                "branchId": 34203,
+                "name": "Camden",
+                "displayAddress": "99-101 Parkway,\r\nCamden,\r\nLondon,\r\nNW1 7PP",
+                "logoUrl": "https:\/\/media.rightmove.co.uk\/company\/clogo_17141_0005.jpeg",
+                "tradingName": "Chestertons ",
+                "latitude": 51.53717496965062,
+                "longitude": -0.14545002220723924
+            }
+        ],
+        "outcodeId": 1855,
+        "outcode": "NW1",
+        "showResiPotential": true
+    }
+}

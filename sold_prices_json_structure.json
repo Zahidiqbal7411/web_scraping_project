@@ -1,0 +1,5 @@
+{
+    "mrmHost": "{{MRM_HOST}}",
+    "mrwHost": "{{MRW_HOST}}",
+    "mediaServerHost": "https:\/\/media.rightmove.co.uk"
+}

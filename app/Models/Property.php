@@ -50,4 +50,10 @@ class Property extends Model
     {
         return $this->belongsTo(SavedSearch::class, 'filter_id');
     }
+
+    public function soldProperties()
+    {
+        // Match sold records by the sold_link URL
+        return $this->hasMany(PropertySold::class, 'source_sold_link', 'sold_link');
+    }
 }

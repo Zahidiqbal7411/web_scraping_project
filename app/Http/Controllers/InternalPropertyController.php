@@ -42,6 +42,108 @@ class InternalPropertyController extends Controller
     }
 
     /**
+     * Load full property data from database (used on page refresh)
+     * This avoids re-scraping from the source website
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function loadPropertiesFromDatabase(Request $request)
+    {
+        try {
+            $searchId = $request->input('search_id');
+            
+            Log::info("loadPropertiesFromDatabase: Loading properties for search_id: " . ($searchId ?? 'all'));
+            
+            // Build query for properties
+            $query = \App\Models\Property::query();
+            
+            if ($searchId) {
+                $query->where('filter_id', $searchId);
+            }
+            
+            // Get properties with their images and sold properties
+            $properties = $query->with(['images', 'soldProperties.prices'])->get();
+            
+            if ($properties->count() === 0) {
+                Log::info("loadPropertiesFromDatabase: No properties found in database");
+                return response()->json([
+                    'success' => true,
+                    'message' => 'No properties found in database',
+                    'count' => 0,
+                    'properties' => [],
+                    'source' => 'database'
+                ]);
+            }
+            
+            Log::info("loadPropertiesFromDatabase: Found " . $properties->count() . " properties in database");
+            
+            // Format properties to match the expected frontend format
+            $formattedProperties = $properties->map(function($prop) {
+                // Build URL from property_id
+                $url = "https://www.rightmove.co.uk/properties/{$prop->property_id}";
+                
+                // Get images
+                $images = $prop->images ? $prop->images->pluck('image_link')->toArray() : [];
+                
+                // Parse key_features if stored as JSON
+                $keyFeatures = [];
+                if ($prop->key_features) {
+                    $decoded = json_decode($prop->key_features, true);
+                    if (is_array($decoded)) {
+                        $keyFeatures = $decoded;
+                    } elseif (is_string($prop->key_features)) {
+                        $keyFeatures = [$prop->key_features];
+                    }
+                }
+                
+                return [
+                    'id' => $prop->property_id,
+                    'url' => $url,
+                    'address' => $prop->location ?? 'Unknown location',
+                    'price' => $prop->price ?? 'Price on request',
+                    'property_type' => $prop->property_type ?? '',
+                    'bedrooms' => $prop->bedrooms ?? '',
+                    'bathrooms' => $prop->bathrooms ?? '',
+                    'size' => $prop->size ?? '',
+                    'tenure' => $prop->tenure ?? '',
+                    'council_tax' => $prop->council_tax ?? '',
+                    'parking' => $prop->parking ?? '',
+                    'garden' => $prop->garden ?? '',
+                    'accessibility' => $prop->accessibility ?? '',
+                    'ground_rent' => $prop->ground_rent ?? '',
+                    'annual_service_charge' => $prop->annual_service_charge ?? '',
+                    'lease_length' => $prop->lease_length ?? '',
+                    'description' => $prop->description ?? '',
+                    'key_features' => $keyFeatures,
+                    'sold_link' => $prop->sold_link ?? null,
+                    'sold_properties' => $prop->soldProperties ?? [],
+                    'images' => $images,
+                    'loading' => false, // Data is fully loaded from DB
+                    'from_database' => true
+                ];
+            })->toArray();
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Properties loaded from database',
+                'count' => count($formattedProperties),
+                'properties' => $formattedProperties,
+                'source' => 'database'
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error("loadPropertiesFromDatabase error: " . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error loading properties from database',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Fetch URLs with pagination support for progressive loading
      * 
      * @param Request $request
@@ -375,40 +477,68 @@ class InternalPropertyController extends Controller
                             
                             // SCRAPE & SAVE SOLD HISTORY
                             if (!empty($propData['sold_link'])) {
-                                Log::info("Found sold link for property {$propId}. Scraping history...");
+                                Log::info("Found sold link for property {$propId}: " . $propData['sold_link']);
                                 $soldData = $this->propertyService->scrapeSoldProperties($propData['sold_link'], $propId);
                                 
                                 if (!empty($soldData)) {
+                                    Log::info("Scraped " . count($soldData) . " sold properties for property {$propId}");
+                                    
                                     foreach ($soldData as $soldProp) {
-                                        // Save to properties_sold
-                                        // We treat 'property_id' in soldProp as the remote ID.
-                                        // We might want to link it to our local Main Property ID?
-                                        // For now, saving as standalone entity related to this context if implied.
-                                        // But wait, the schema we built has 'property_id' in properties_sold.
-                                        // Let's use the 'property_id' from the sold property itself if available (Rightmove ID).
-                                        
-                                        $soldRecord = PropertySold::create([
-                                            'property_id' => $soldProp['property_id'], // Remote ID of sold prop
-                                            'location' => $soldProp['location'],
-                                            'property_type' => $soldProp['property_type'],
-                                            'bedrooms' => $soldProp['bedrooms'],
-                                            'bathrooms' => $soldProp['bathrooms'],
-                                            'tenure' => $soldProp['tenure']
-                                        ]);
-                                        
-                                        // Save transactions
-                                        if (!empty($soldProp['transactions'])) {
-                                            foreach ($soldProp['transactions'] as $trans) {
-                                                PropertySoldPrice::create([
-                                                    'sold_property_id' => $soldRecord->id,
-                                                    'sold_price' => $trans['price'],
-                                                    'sold_date' => $trans['date']
-                                                ]);
+                                        try {
+                                            // Validate we have minimum required data
+                                            if (empty($soldProp['property_id']) && empty($soldProp['location'])) {
+                                                Log::warning("Skipping sold property with no ID or location");
+                                                continue;
                                             }
+                                            
+                                            // Save to properties_sold - use updateOrCreate to avoid duplicates
+                                            // Using source_sold_link for URL-based matching (simpler than ID)
+                                            $soldRecord = PropertySold::updateOrCreate(
+                                                [
+                                                    'property_id' => $soldProp['property_id'],
+                                                    'source_sold_link' => $propData['sold_link']
+                                                ],
+                                                [
+                                                    'location' => $soldProp['location'],
+                                                    'property_type' => $soldProp['property_type'],
+                                                    'bedrooms' => $soldProp['bedrooms'],
+                                                    'bathrooms' => $soldProp['bathrooms'],
+                                                    'tenure' => $soldProp['tenure']
+                                                ]
+                                            );
+                                            
+                                            Log::info("Saved sold property record ID: {$soldRecord->id}, Rightmove ID: {$soldProp['property_id']}");
+                                            
+                                            // Save transactions (price history)
+                                            if (!empty($soldProp['transactions'])) {
+                                                // Clear old transactions for this sold property
+                                                PropertySoldPrice::where('sold_property_id', $soldRecord->id)->delete();
+                                                
+                                                foreach ($soldProp['transactions'] as $trans) {
+                                                    if (!empty($trans['price']) || !empty($trans['date'])) {
+                                                        $priceRecord = PropertySoldPrice::create([
+                                                            'sold_property_id' => $soldRecord->id,
+                                                            'sold_price' => $trans['price'],
+                                                            'sold_date' => $trans['date']
+                                                        ]);
+                                                        Log::info("Saved sold price: {$trans['price']} on {$trans['date']}");
+                                                    }
+                                                }
+                                                Log::info("Saved " . count($soldProp['transactions']) . " price records for sold property {$soldRecord->id}");
+                                            } else {
+                                                Log::warning("No transactions found for sold property {$soldRecord->id}");
+                                            }
+                                        } catch (\Exception $soldEx) {
+                                            Log::error("Failed to save sold property data: " . $soldEx->getMessage());
+                                            Log::error("Sold property data: " . json_encode($soldProp));
                                         }
                                     }
-                                    Log::info("Saved " . count($soldData) . " sold history records for property {$propId}");
+                                    Log::info("Completed saving sold history for property {$propId}");
+                                } else {
+                                    Log::warning("No sold data returned from scrapeSoldProperties for property {$propId}");
                                 }
+                            } else {
+                                Log::info("No sold link available for property {$propId}");
                             }
                             
                             // Update Images
@@ -530,6 +660,143 @@ class InternalPropertyController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred while fetching property data',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Process sold_link URLs from properties table and populate sold data tables
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function processSoldLinks(Request $request)
+    {
+        try {
+            set_time_limit(600); // 10 minutes
+            
+            $limit = $request->input('limit', null);
+            
+            // Get properties with sold_link
+            $query = \App\Models\Property::whereNotNull('sold_link')
+                ->where('sold_link', '!=', '');
+                
+            if ($limit) {
+                $query->limit((int)$limit);
+            }
+            
+            $properties = $query->get();
+            $totalProperties = $properties->count();
+            
+            if ($totalProperties === 0) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'No properties with sold_link found',
+                    'processed' => 0,
+                    'sold_properties' => 0,
+                    'sold_prices' => 0
+                ]);
+            }
+            
+            Log::info("Processing {$totalProperties} properties with sold_link");
+            
+            $processedCount = 0;
+            $soldPropertiesCount = 0;
+            $soldPricesCount = 0;
+            $errors = [];
+            
+            foreach ($properties as $property) {
+                try {
+                    Log::info("Processing sold link for property {$property->property_id}: {$property->sold_link}");
+                    
+                    // Scrape sold properties from the sold link
+                    $soldData = $this->propertyService->scrapeSoldProperties($property->sold_link, $property->property_id);
+                    
+                    if (empty($soldData)) {
+                        Log::info("No sold data found for property {$property->property_id}");
+                        continue;
+                    }
+                    
+                    Log::info("Found " . count($soldData) . " sold properties for property {$property->property_id}");
+                    
+                    foreach ($soldData as $soldProp) {
+                        try {
+                            // Validate we have minimum required data
+                            if (empty($soldProp['property_id']) && empty($soldProp['location'])) {
+                                continue;
+                            }
+                            
+                            // Save to properties_sold
+                            // Using source_sold_link for URL-based matching
+                            $soldRecord = PropertySold::updateOrCreate(
+                                [
+                                    'property_id' => $soldProp['property_id'],
+                                    'source_sold_link' => $property->sold_link
+                                ],
+                                [
+                                    'location' => $soldProp['location'] ?? '',
+                                    'property_type' => $soldProp['property_type'] ?? '',
+                                    'bedrooms' => $soldProp['bedrooms'],
+                                    'bathrooms' => $soldProp['bathrooms'],
+                                    'tenure' => $soldProp['tenure'] ?? ''
+                                ]
+                            );
+                            
+                            $soldPropertiesCount++;
+                            
+                            // Save transaction history
+                            if (!empty($soldProp['transactions'])) {
+                                // Clear old transactions
+                                PropertySoldPrice::where('sold_property_id', $soldRecord->id)->delete();
+                                
+                                foreach ($soldProp['transactions'] as $trans) {
+                                    if (!empty($trans['price']) || !empty($trans['date'])) {
+                                        PropertySoldPrice::create([
+                                            'sold_property_id' => $soldRecord->id,
+                                            'sold_price' => $trans['price'] ?? '',
+                                            'sold_date' => $trans['date'] ?? ''
+                                        ]);
+                                        $soldPricesCount++;
+                                    }
+                                }
+                            }
+                            
+                        } catch (\Exception $e) {
+                            Log::error("Error saving sold property: " . $e->getMessage());
+                            $errors[] = $e->getMessage();
+                        }
+                    }
+                    
+                    $processedCount++;
+                    
+                    // Small delay to be respectful to the server
+                    usleep(300000); // 0.3 second
+                    
+                } catch (\Exception $e) {
+                    Log::error("Error processing sold link for property {$property->property_id}: " . $e->getMessage());
+                    $errors[] = "Property {$property->property_id}: " . $e->getMessage();
+                }
+            }
+            
+            Log::info("Completed processing sold links. Processed: {$processedCount}, Sold: {$soldPropertiesCount}, Prices: {$soldPricesCount}");
+            
+            return response()->json([
+                'success' => true,
+                'message' => "Processed {$processedCount} properties with sold links",
+                'total_properties' => $totalProperties,
+                'processed' => $processedCount,
+                'sold_properties' => $soldPropertiesCount,
+                'sold_prices' => $soldPricesCount,
+                'errors' => count($errors) > 0 ? $errors : null
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error("Error processing sold links: " . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'An error occurred while processing sold links',
                 'error' => $e->getMessage()
             ], 500);
         }
