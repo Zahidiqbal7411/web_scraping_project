@@ -97,6 +97,37 @@ class InternalPropertyController extends Controller
                     }
                 }
                 
+                // Format sold properties with their prices for JavaScript consumption
+                // Also deduplicate by location to prevent same property showing multiple times
+                $soldProperties = [];
+                if ($prop->soldProperties && $prop->soldProperties->count() > 0) {
+                    Log::info("Property {$prop->property_id} has {$prop->soldProperties->count()} sold properties via relationship");
+                    $soldProperties = $prop->soldProperties
+                        ->unique('location')  // Deduplicate by location
+                        ->values()
+                        ->map(function($sold) {
+                        return [
+                            'id' => $sold->id,
+                            'property_id' => $sold->property_id,
+                            'location' => $sold->location,
+                            'property_type' => $sold->property_type,
+                            'bedrooms' => $sold->bedrooms,
+                            'bathrooms' => $sold->bathrooms,
+                            'tenure' => $sold->tenure,
+                            'detail_url' => $sold->detail_url,
+                            'prices' => $sold->prices ? $sold->prices->map(function($price) {
+                                return [
+                                    'sold_price' => $price->sold_price,
+                                    'sold_date' => $price->sold_date
+                                ];
+                            })->toArray() : []
+                        ];
+                    })->toArray();
+                } else {
+                    // Debug: Log why no sold properties are found
+                    Log::info("Property {$prop->property_id} has no sold properties. sold_link: " . ($prop->sold_link ?? 'NULL'));
+                }
+                
                 return [
                     'id' => $prop->property_id,
                     'url' => $url,
@@ -117,7 +148,7 @@ class InternalPropertyController extends Controller
                     'description' => $prop->description ?? '',
                     'key_features' => $keyFeatures,
                     'sold_link' => $prop->sold_link ?? null,
-                    'sold_properties' => $prop->soldProperties ?? [],
+                    'sold_properties' => $soldProperties,
                     'images' => $images,
                     'loading' => false, // Data is fully loaded from DB
                     'from_database' => true
@@ -503,7 +534,8 @@ class InternalPropertyController extends Controller
                                                     'property_type' => $soldProp['property_type'],
                                                     'bedrooms' => $soldProp['bedrooms'],
                                                     'bathrooms' => $soldProp['bathrooms'],
-                                                    'tenure' => $soldProp['tenure']
+                                                    'tenure' => $soldProp['tenure'],
+                                                    'detail_url' => $soldProp['detail_url'] ?? null
                                                 ]
                                             );
                                             
@@ -739,7 +771,8 @@ class InternalPropertyController extends Controller
                                     'property_type' => $soldProp['property_type'] ?? '',
                                     'bedrooms' => $soldProp['bedrooms'],
                                     'bathrooms' => $soldProp['bathrooms'],
-                                    'tenure' => $soldProp['tenure'] ?? ''
+                                    'tenure' => $soldProp['tenure'] ?? '',
+                                    'detail_url' => $soldProp['detail_url'] ?? null
                                 ]
                             );
                             

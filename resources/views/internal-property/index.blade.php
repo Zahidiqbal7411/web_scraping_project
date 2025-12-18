@@ -281,6 +281,31 @@
             flex-direction: column;
         }
 
+        /* Average Sold Price Display */
+        .avg-sold-price {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0;
+            margin-top: 0.25rem;
+            font-size: 0.85rem;
+        }
+
+        .avg-sold-price .avg-label {
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .avg-sold-price .avg-value {
+            font-weight: 700;
+            color: var(--success);
+        }
+
+        .avg-sold-price .avg-count {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+        }
+
         /* Sold Sidebar Styles */
         .sold-sidebar-header {
             padding: 1rem 1.5rem;
@@ -298,6 +323,31 @@
             display: flex;
             align-items: center;
             gap: 0.5rem;
+        }
+
+        /* Clickable Sold History Title Link */
+        .sold-sidebar-title-link {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            text-decoration: none;
+            transition: color 0.2s ease;
+        }
+
+        .sold-sidebar-title-link:hover {
+            color: var(--secondary);
+        }
+
+        .sold-sidebar-title-link .link-arrow {
+            opacity: 0.5;
+            transition: opacity 0.2s ease;
+        }
+
+        .sold-sidebar-title-link:hover .link-arrow {
+            opacity: 1;
         }
 
         .sold-list-container {
@@ -381,6 +431,77 @@
         .sold-history-price {
             font-weight: 700;
             color: var(--primary);
+        }
+
+        /* Sold Details Link Button */
+        .sold-details-link {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+            width: 100%;
+            padding: 0.5rem;
+            margin-top: 0.75rem;
+            background: var(--secondary);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+        }
+        
+        .sold-details-link:hover {
+            background: hsl(200, 70%, 40%);
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+        }
+        
+        .sold-details-link svg {
+            flex-shrink: 0;
+        }
+
+        /* Sold Sidebar Footer */
+        .sold-sidebar-footer {
+            padding: 0.75rem;
+            border-top: 1px solid var(--card-border);
+            background: #f8f9fa;
+        }
+
+        /* Clickable Sold Card Link */
+        .sold-item-card-link {
+            text-decoration: none;
+            color: inherit;
+            display: block;
+        }
+
+        .sold-item-card-link:hover .sold-item-card {
+            background: var(--card-bg);
+            border-color: var(--secondary);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transform: translateY(-1px);
+        }
+
+        .sold-item-card-link:hover .sold-link-hint {
+            color: var(--secondary);
+        }
+
+        /* Link Hint at bottom of sold card */
+        .sold-link-hint {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 0.3rem;
+            margin-top: 0.5rem;
+            font-size: 0.65rem;
+            color: var(--text-secondary);
+            transition: color 0.2s ease;
+        }
+
+        .sold-link-hint svg {
+            flex-shrink: 0;
         }
 
         /* Layout Overrides to fill screen but prevent overflow */
@@ -1256,7 +1377,7 @@
         let propertyUrls = [];
         let loadedProperties = [];
         let currentPage = 1;
-        const itemsPerPage = 9; // Show 9 items per page
+        const itemsPerPage = 10; // Show 10 items per page
 
         // Elements
         const syncBtn = document.getElementById('syncBtn');
@@ -1757,6 +1878,41 @@
                                 ${property.reduced_on ? `<span class="info-icon" title="Price information">ⓘ</span>` : ''}
                             </div>
                             
+                            ${(() => {
+                                // Calculate average sold price from all sold properties
+                                if (property.sold_properties && property.sold_properties.length > 0) {
+                                    let totalPrice = 0;
+                                    let priceCount = 0;
+                                    
+                                    property.sold_properties.forEach(sold => {
+                                        if (sold.prices && sold.prices.length > 0) {
+                                            sold.prices.forEach(price => {
+                                                // Parse the price (remove £, commas, and convert to number)
+                                                const priceStr = price.sold_price || '';
+                                                const numericPrice = parseFloat(priceStr.replace(/[£,]/g, ''));
+                                                if (!isNaN(numericPrice) && numericPrice > 0) {
+                                                    totalPrice += numericPrice;
+                                                    priceCount++;
+                                                }
+                                            });
+                                        }
+                                    });
+                                    
+                                    if (priceCount > 0) {
+                                        const avgPrice = Math.round(totalPrice / priceCount);
+                                        const formattedAvg = '£' + avgPrice.toLocaleString('en-GB');
+                                        return `
+                                            <div class="avg-sold-price">
+                                                <span class="avg-label">Avg Sold Price</span>
+                                                <span class="avg-value">${formattedAvg}</span>
+                                                <span class="avg-count">(${priceCount} sale${priceCount > 1 ? 's' : ''})</span>
+                                            </div>
+                                        `;
+                                    }
+                                }
+                                return '';
+                            })()}
+                            
                             ${property.reduced_on ? `
                                 <div class="reduced-date">Reduced on ${property.reduced_on}</div>
                             ` : ''}
@@ -1806,41 +1962,56 @@
                     <!-- RIGHT SIDE: Sold History Sidebar -->
                     <div class="property-sold-sidebar">
                         <div class="sold-sidebar-header">
-                            <div class="sold-sidebar-title">
-                                <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                </svg>
-                                Sold History (${property.sold_properties ? property.sold_properties.length : 0})
-                            </div>
+                            ${property.sold_link ? `
+                                <a href="${property.sold_link}" target="_blank" class="sold-sidebar-title-link" onclick="event.stopPropagation()">
+                                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                    </svg>
+                                    Sold History (${property.sold_properties ? property.sold_properties.length : 0})
+                                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" class="link-arrow">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                                    </svg>
+                                </a>
+                            ` : `
+                                <div class="sold-sidebar-title">
+                                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                    </svg>
+                                    Sold History (${property.sold_properties ? property.sold_properties.length : 0})
+                                </div>
+                            `}
                         </div>
                         
                         <div class="sold-list-container">
                             ${property.sold_properties && property.sold_properties.length > 0 ? 
                                 property.sold_properties.map(sold => {
+                                    const soldLink = sold.detail_url || property.sold_link || '#';
                                     return `
-                                    <div class="sold-item-card">
-                                        <!-- Property Details (TOP) -->
-                                        <div class="sold-property-info">
-                                            <div class="sold-property-type">${sold.property_type || 'Property'} (${sold.tenure || 'Unknown'})</div>
-                                            <div class="sold-property-details">
-                                                <span>🛏️ ${sold.bedrooms || '-'} Beds</span>
-                                                <span>🛁 ${sold.bathrooms || '-'} Baths</span>
+                                    <a href="${soldLink}" target="_blank" class="sold-item-card-link" onclick="event.stopPropagation()">
+                                        <div class="sold-item-card">
+                                            <!-- Property Details (TOP) -->
+                                            <div class="sold-property-info">
+                                                <div class="sold-property-type">${sold.property_type || 'Property'} (${sold.tenure || 'Unknown'})</div>
+                                                <div class="sold-property-details">
+                                                    <span>🛏️ ${sold.bedrooms || '-'} Beds</span>
+                                                    <span>🛁 ${sold.bathrooms || '-'} Baths</span>
+                                                </div>
                                             </div>
+                                            
+                                            <!-- All Prices (BELOW) -->
+                                            ${sold.prices && sold.prices.length > 0 ? `
+                                                <div class="sold-prices-section">
+                                                    <div class="sold-prices-title">Sale History</div>
+                                                    ${sold.prices.map(price => `
+                                                        <div class="sold-history-row">
+                                                            <span>${price.sold_date || '-'}</span>
+                                                            <span class="sold-history-price">${price.sold_price || '-'}</span>
+                                                        </div>
+                                                    `).join('')}
+                                                </div>
+                                            ` : `<div style="font-size:0.75rem; color:var(--text-secondary); font-style:italic;">No price data</div>`}
                                         </div>
-                                        
-                                        <!-- All Prices (BELOW) -->
-                                        ${sold.prices && sold.prices.length > 0 ? `
-                                            <div class="sold-prices-section">
-                                                <div class="sold-prices-title">Sale History</div>
-                                                ${sold.prices.map(price => `
-                                                    <div class="sold-history-row">
-                                                        <span>${price.sold_date || '-'}</span>
-                                                        <span class="sold-history-price">${price.sold_price || '-'}</span>
-                                                    </div>
-                                                `).join('')}
-                                            </div>
-                                        ` : `<div style="font-size:0.75rem; color:var(--text-secondary); font-style:italic;">No price data</div>`}
-                                    </div>
+                                    </a>
                                     `;
                                 }).join('') 
                             :   `<div style="color:var(--text-secondary); text-align:center; padding:2rem; font-style:italic;">

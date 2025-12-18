@@ -14,6 +14,7 @@ class PropertySold extends Model
     protected $fillable = [
         'property_id',
         'source_sold_link',
+        'detail_url',
         'location',
         'property_type',
         'bedrooms',

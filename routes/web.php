@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Controllers\ProfileController;
-use App\Http\Controllers\ScraperController;
 use App\Http\Controllers\PropertyController;
 use App\Http\Controllers\InternalPropertyController;
 use Illuminate\Support\Facades\Route;
@@ -21,13 +20,6 @@ Route::middleware('auth')->group(function () {
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 });
-
-// Scraper routes (public access)
-Route::get('/scrape-services', [ScraperController::class, 'scrapeServices']);
-Route::get('/scrape-testimonials', [ScraperController::class, 'scrapeTestimonials']);
-Route::get('/testimonials', [ScraperController::class, 'showTestimonials']);
-Route::get('/api/testimonials', [ScraperController::class, 'getTestimonials']);
-Route::post('/sync-testimonials', [ScraperController::class, 'syncTestimonials']);
 
 // Property routes (public access)
 Route::get('/properties', [PropertyController::class, 'index'])->name('properties.index');

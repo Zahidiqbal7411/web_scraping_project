@@ -580,6 +580,21 @@ class InternalPropertyService
                          $tenure = $result['latestTransaction']['tenure'];
                      }
                      
+                     // Extract detail URL for individual sold property
+                     $detailUrl = null;
+                     if (isset($result['detailUrl'])) {
+                         $detailUrl = $result['detailUrl'];
+                     } elseif (isset($result['propertyDetailUrl'])) {
+                         $detailUrl = $result['propertyDetailUrl'];
+                     } elseif (isset($result['url'])) {
+                         $detailUrl = $result['url'];
+                     }
+                     
+                     // Ensure absolute URL
+                     if ($detailUrl && strpos($detailUrl, 'http') !== 0) {
+                         $detailUrl = 'https://www.rightmove.co.uk' . $detailUrl;
+                     }
+                     
                      $soldProp = [
                          'property_id' => $propertyId,
                          'location' => $result['address'] ?? $result['displayAddress'] ?? '',
@@ -587,10 +602,11 @@ class InternalPropertyService
                          'bedrooms' => $result['bedrooms'] ?? null,
                          'bathrooms' => $result['bathrooms'] ?? null,
                          'tenure' => $tenure,
+                         'detail_url' => $detailUrl,
                          'transactions' => []
                      ];
                      
-                     Log::info("Processing sold property: " . $propertyId . " at " . $soldProp['location']);
+                     Log::info("Processing sold property: " . $propertyId . " at " . $soldProp['location'] . " with detail_url: " . ($detailUrl ?? 'NULL'));
 
                      // Transactions (Sold History) - check multiple possible field names
                      $transactions = $result['transactions'] ?? $result['soldPrices'] ?? $result['priceHistory'] ?? [];
