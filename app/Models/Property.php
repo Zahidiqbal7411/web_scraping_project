@@ -53,7 +53,7 @@ class Property extends Model
 
     public function soldProperties()
     {
-        // Match sold records by the sold_link URL
-        return $this->hasMany(PropertySold::class, 'source_sold_link', 'sold_link');
+        // Match sold records by the parent property_id
+        return $this->hasMany(PropertySold::class, 'property_id', 'property_id');
     }
 }

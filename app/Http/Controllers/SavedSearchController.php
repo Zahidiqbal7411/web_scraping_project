@@ -27,12 +27,6 @@ class SavedSearchController extends Controller
 
     public function store(Request $request)
     {
-        // Delete all existing saved searches to ensure only one exists
-        SavedSearch::query()->delete();
-        
-        // Also delete all existing scraped URLs since we are resetting the search
-        Url::query()->delete();
-
         $validated = $request->validate([
             'updates_url' => 'required|url',
         ]);

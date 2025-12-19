@@ -733,7 +733,7 @@
                                 </svg>
                                 Generate URL
                             </button>
-                            <a id="visitUrlBtn" href="#" target="_blank" class="btn btn-primary btn-sm" style="padding: 0.4rem 0.75rem; font-size: 0.8rem; display: none; align-items: center;">
+                            <a id="formVisitUrlBtn" href="#" target="_blank" class="btn btn-primary btn-sm" style="padding: 0.4rem 0.75rem; font-size: 0.8rem; display: none; align-items: center;">
                                 <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin-right: 0.25rem;">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
                                 </svg>
@@ -828,7 +828,7 @@
                         <button id="updateUrlBtn" class="btn btn-primary" style="display: none;">
                             Update URL
                         </button>
-                        <a id="visitUrlBtn" href="#" target="_blank" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.5rem;">
+                        <a id="previewVisitUrlBtn" href="#" target="_blank" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.5rem;">
                             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" style="width: 18px; height: 18px;">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
                             </svg>
@@ -948,7 +948,8 @@
             }
         });
 
-        const visitUrlBtn = document.getElementById('visitUrlBtn');
+        const formVisitUrlBtn = document.getElementById('formVisitUrlBtn');
+        const previewVisitUrlBtn = document.getElementById('previewVisitUrlBtn');
         
         // Restore missing element references
         const minPriceSelect = document.getElementById('minPrice');
@@ -966,7 +967,7 @@
             saveButtonText.textContent = 'Save Search';
             // Show Save button, hide Visit button
             saveSearchBtn.style.display = 'flex';
-            visitUrlBtn.style.display = 'none';
+            formVisitUrlBtn.style.display = 'none';
             document.getElementById('generateUrlBtn').style.display = 'inline-flex';
             
             editSearchId.value = '';
@@ -1401,7 +1402,7 @@
         window.showUrlPreview = (url, searchId) => {
             urlPreviewText.textContent = url;
             urlEditTextarea.value = url;
-            visitUrlBtn.href = url;
+            previewVisitUrlBtn.href = url;
             urlPreviewSearchId.value = searchId || '';
             urlPreviewModal.classList.add('active');
         };
@@ -1477,20 +1478,42 @@
                 return;
             }
 
+            // Reset form first to clear any previous data
+            resetForm();
+            
+            // Enable inputs for editing
+            enableFormInputs();
+
             editSearchId.value = id;
             modalTitle.textContent = 'Edit Search';
             saveButtonText.textContent = 'Update Search';
+            
+            // Show Save button and Generate URL button for edit mode
+            saveSearchBtn.style.display = 'flex';
+            formVisitUrlBtn.style.display = 'none';
+            document.getElementById('generateUrlBtn').style.display = 'inline-flex';
 
             // Parse URL to populate form
             try {
                 const urlObj = new URL(search.updates_url);
                 const params = new URLSearchParams(urlObj.search);
 
-                // Set area by locationIdentifier
+                // Set area - prefer database value, then URL parsing
                 const locationId = params.get('locationIdentifier') || '';
                 const searchLocation = params.get('searchLocation') || '';
                 
-                if (locationId) {
+                // Use search.area from database first (most reliable)
+                if (search.area) {
+                    areaInput.value = search.area.replace(/\+/g, ' ');
+                    areaName.value = search.area.replace(/\+/g, ' ');
+                    // Try to find identifier from areaMapping
+                    const foundId = areaMapping[search.area] || areaMapping[search.area.replace(/\+/g, ' ')];
+                    if (foundId) {
+                        areaIdentifier.value = foundId;
+                    } else if (locationId) {
+                        areaIdentifier.value = locationId;
+                    }
+                } else if (locationId) {
                     areaIdentifier.value = locationId;
                     
                     if (searchLocation) {
@@ -1503,11 +1526,14 @@
                             areaName.value = foundName;
                             areaInput.value = foundName;
                         } else {
-                            // If ID exists but name unknown, at least show the ID or leave empty
-                            areaName.value = locationId; // fallback
-                            areaInput.value = ''; // leave input empty or show ID? Empty is safer
+                            // If ID exists but name unknown, show the ID
+                            areaName.value = locationId;
+                            areaInput.value = locationId;
                         }
                     }
+                } else if (searchLocation) {
+                    areaInput.value = searchLocation;
+                    areaName.value = searchLocation;
                 }
 
                 // Set prices
@@ -1596,10 +1622,10 @@
             
             // Show Visit URL button
             if (search.updates_url) {
-                visitUrlBtn.href = search.updates_url;
-                visitUrlBtn.style.display = 'inline-flex';
+                formVisitUrlBtn.href = search.updates_url;
+                formVisitUrlBtn.style.display = 'inline-flex';
             } else {
-                visitUrlBtn.style.display = 'none';
+                formVisitUrlBtn.style.display = 'none';
             }
 
             // Ensure modal is active (editSearch already does this, but good to ensure)

@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Controllers\ProfileController;
-use App\Http\Controllers\PropertyController;
 use App\Http\Controllers\InternalPropertyController;
 use Illuminate\Support\Facades\Route;
 
@@ -21,12 +20,6 @@ Route::middleware('auth')->group(function () {
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 });
 
-// Property routes (public access)
-Route::get('/properties', [PropertyController::class, 'index'])->name('properties.index');
-Route::get('/api/properties', [PropertyController::class, 'getProperties'])->name('properties.get');
-Route::post('/api/properties/sync', [PropertyController::class, 'sync'])->name('properties.sync');
-Route::get('/api/properties/test', [PropertyController::class, 'test'])->name('properties.test');
-
 // Internal Property routes (require authentication)
 Route::middleware(['auth'])->group(function () {
     Route::get('/internal-properties', [InternalPropertyController::class, 'index'])->name('internal-property.index');
@@ -36,6 +29,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/api/internal-property/fetch-urls-paginated', [InternalPropertyController::class, 'fetchUrlsPaginated'])->name('internal-property.fetch-urls-paginated');
     Route::post('/api/internal-property/fetch-all', [InternalPropertyController::class, 'fetchAllProperties'])->name('internal-property.fetch-all');
     Route::post('/api/internal-property/sync', [InternalPropertyController::class, 'sync'])->name('internal-property.sync');
+    Route::post('/api/internal-property/process-sold-links', [InternalPropertyController::class, 'processSoldLinks'])->name('internal-property.process-sold-links');
 });
 
 // Saved Search routes (require authentication)

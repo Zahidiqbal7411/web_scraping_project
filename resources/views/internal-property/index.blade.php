@@ -1270,6 +1270,136 @@
             flex-shrink: 0;
         }
 
+        
+        /* Import Progress Bar */
+        .import-progress-container {
+            background: linear-gradient(135deg, var(--card-bg), #f8f9fa);
+            border: 2px solid var(--primary);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: var(--shadow-lg);
+            display: none;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        .import-progress-container.active {
+            display: block;
+        }
+        
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        
+        .progress-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .progress-title::before {
+            content: '⚡';
+            font-size: 1.3rem;
+        }
+        
+        .progress-stats {
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+        
+        .progress-stats span {
+            color: var(--primary);
+            font-weight: 700;
+        }
+        
+        .progress-bar-wrapper {
+            position: relative;
+            width: 100%;
+            height: 40px;
+            background: rgba(0, 0, 0, 0.05);
+            border-radius: 20px;
+            overflow: hidden;
+            margin-bottom: 1rem;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+            width: 0%;
+            transition: width 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .progress-bar-fill::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+            animation: shimmer 2s infinite;
+        }
+        
+        @keyframes shimmer {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+                
+        .progress-percentage {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-weight: 700;
+            font-size: 0.9rem;
+            color: var(--text-primary);
+            z-index: 2;
+            text-shadow: 0 1px 2px rgba(255,255,255,0.8);
+        }
+        
+        .progress-details {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+        
+        .progress-details > span:first-child {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        .progress-speed {
+            color: var(--success);
+            font-weight: 600;
+        }
+        
+        .progress-speed::before {
+            content: '⚡ ';
+        }
+        
+        .progress-eta {
+            color: var(--secondary);
+            font-weight: 600;
+        }
+        
+        .progress-eta::before {
+            content: '⏱ ';
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .title {
@@ -1281,6 +1411,17 @@
             }
 
             .stats-bar {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .progress-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.5rem;
+            }
+            
+            .progress-details {
                 flex-direction: column;
                 align-items: flex-start;
             }
@@ -1348,6 +1489,23 @@
         <div class="alert alert-success" id="successAlert"></div>
         <div class="alert alert-error" id="errorAlert"></div>
 
+        <!-- Import Progress Bar -->
+        <div class="import-progress-container" id="importProgress">
+            <div class="progress-header">
+                <span class="progress-title">Importing Properties</span>
+                <span class="progress-stats">Chunk <span id="currentChunk">0</span> of <span id="totalChunks">0</span></span>
+            </div>
+            <div class="progress-bar-wrapper">
+                <div class="progress-bar-fill" id="progressBarFill"></div>
+                <span class="progress-percentage" id="progressPercentage">0%</span>
+            </div>
+            <div class="progress-details">
+                <span><span id="propertiesImported">0</span> of <span id="totalProperties">0</span> properties</span>
+                <span class="progress-speed" id="importSpeed"></span>
+                <span class="progress-eta" id="importETA"></span>
+            </div>
+        </div>
+
         <!-- Loading State -->
         <div class="loading" id="loading">
             <div class="spinner"></div>
@@ -1373,25 +1531,38 @@
         // State
         let currentSlide = 0;
         let propertyData = null;
-        let currentImageIndexes = {};
         let propertyUrls = [];
         let loadedProperties = [];
         let currentPage = 1;
-        const itemsPerPage = 10; // Show 10 items per page
-
+        const itemsPerPage = 10; // Show 10 properties per page
+        
+        // Image slider state
+        let currentImageIndexes = {};
+        
         // Elements
-        const syncBtn = document.getElementById('syncBtn');
+        const statsBar = document.getElementById('statsBar');
+        const successAlert = document.getElementById('successAlert');
+        const errorAlert = document.getElementById('errorAlert');
         const loading = document.getElementById('loading');
         const emptyState = document.getElementById('emptyState');
         const propertiesGrid = document.getElementById('propertiesGrid');
-        const statsBar = document.getElementById('statsBar');
         const totalCount = document.getElementById('totalCount');
         const loadedCount = document.getElementById('loadedCount');
-        const successAlert = document.getElementById('successAlert');
-        const errorAlert = document.getElementById('errorAlert');
-
-        // Sample property URLs - in real implementation, this would come from your database or API
-        // These will be fetched dynamically from the PropertyController
+        const syncBtn = document.getElementById('syncBtn');
+        
+        // Progress bar elements
+        const importProgress = document.getElementById('importProgress');
+        const progressBarFill = document.getElementById('progressBarFill');
+        const progressPercentage = document.getElementById('progressPercentage');
+        const currentChunkEl = document.getElementById('currentChunk');
+        const totalChunksEl = document.getElementById('totalChunks');
+        const propertiesImported = document.getElementById('propertiesImported');
+        const totalPropertiesEl = document.getElementById('totalProperties');
+        const importSpeed = document.getElementById('importSpeed');
+        const importETA = document.getElementById('importETA');
+        
+        // Search context from server
+        window.searchContext = {!! json_encode($search ?? null) !!};
 
         // Import button handler
         syncBtn.addEventListener('click', async () => {
@@ -1408,13 +1579,76 @@
         async function loadFromDatabaseOnStartup() {
             try {
                 loading.classList.add('active');
+                emptyState.classList.remove('active');
                 
-                // Call the new endpoint that returns complete property data from DB
+                // Load first page
+                const data = await loadPropertiesPage(1);
+                
+                if (!data || !data.properties || data.properties.length === 0) {
+                    loading.classList.remove('active');
+                    emptyState.classList.add('active');
+                    statsBar.style.display = 'none';
+                    console.log('No properties in database. Click Import to fetch from source.');
+                    return;
+                }
+                
+                // Show stats bar and initial data
+                statsBar.style.display = 'flex';
+                totalCount.textContent = data.total;
+                loadedCount.textContent = data.properties.length;
+                
+                loadedProperties = data.properties;
+                propertyUrls = data.properties.map(p => ({ url: p.url, id: p.id }));
+                
+                console.log(`✓ Loaded page 1: ${data.properties.length} properties`);
+                console.log(`Total: ${data.total}, Pages: ${data.total_pages}, Has more: ${data.has_more}`);
+                console.log(`Images in first property: ${data.properties[0]?.images?.length || 0}`);
+                console.log(`Sold data in first property: ${data.properties[0]?.sold_properties?.length || 0}`);
+                
+                displayProperties(loadedProperties);
+                loading.classList.remove('active');
+                showAlert('success', `Loaded ${data.properties.length} of ${data.total} properties`);
+                
+                // If there are more pages, load them in background
+                if (data.has_more) {
+                    console.log(`Loading remaining pages in background...`);
+                    for (let page = 2; page <= data.total_pages; page++) {
+                        const pageData = await loadPropertiesPage(page);
+                        if (pageData && pageData.properties) {
+                            loadedProperties = loadedProperties.concat(pageData.properties);
+                            propertyUrls = propertyUrls.concat(pageData.properties.map(p => ({ url: p.url, id: p.id })));
+                            
+                            // Update loaded count progressively
+                            loadedCount.textContent = loadedProperties.length;
+                            console.log(`✓ Loaded page ${page}: ${loadedProperties.length} / ${data.total} properties`);
+                            
+                            // Refresh display if on first page to show new items
+                            if (currentPage === 1) {
+                                displayProperties(loadedProperties);
+                            }
+                        }
+                    }
+                    showAlert('success', `All ${loadedProperties.length} properties loaded successfully!`);
+                }
+                
+            } catch (error) {
+                console.error('=== ERROR LOADING FROM DATABASE ===');
+                console.error('Error:', error);
+                console.error('Stack:', error.stack);
+                loading.classList.remove('active');
+                emptyState.classList.add('active');
+                statsBar.style.display = 'none';
+            }
+        }
+        
+        // Load a single page of properties from database
+        async function loadPropertiesPage(page) {
+            try {
                 const url = window.searchContext 
-                    ? `/api/internal-property/load-from-db?search_id=${window.searchContext.id}` 
-                    : `/api/internal-property/load-from-db`;
+                    ? `/api/internal-property/load-from-db?search_id=${window.searchContext.id}&page=${page}&per_page=50` 
+                    : `/api/internal-property/load-from-db?page=${page}&per_page=50`;
                 
-                console.log('Loading from DB, URL:', url);
+                console.log(`Loading page ${page} from:`, url);
                 
                 const response = await fetch(url, {
                     method: 'GET',
@@ -1425,46 +1659,22 @@
                     }
                 });
                 
-                console.log('Response status:', response.status);
-                
                 if (!response.ok) {
-                    const text = await response.text();
-                    console.error('Error response:', text.substring(0, 500));
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 
                 const data = await response.json();
-                console.log('Data received:', data.success, 'count:', data.count);
                 
-                loading.classList.remove('active');
-                
-                if (!data.success || !data.properties || data.properties.length === 0) {
-                    // No data in database - show empty state
-                    emptyState.classList.add('active');
-                    console.log('No properties in database. Click Import to fetch from source.');
-                    return;
+                if (!data.success) {
+                    console.error('Response not successful:', data.message);
+                    return null;
                 }
                 
-                // We have data from database - display it directly!
-                console.log(`Loaded ${data.properties.length} complete properties from database`);
-                
-                emptyState.classList.remove('active');
-                statsBar.style.display = 'flex';
-                totalCount.textContent = data.properties.length;
-                loadedCount.textContent = data.properties.length; // All loaded!
-                
-                // Properties from DB are already complete - no loading state
-                loadedProperties = data.properties;
-                propertyUrls = data.properties.map(p => ({ url: p.url, id: p.id }));
-                
-                displayProperties(loadedProperties);
-                
-                showAlert('success', `Loaded ${data.properties.length} properties from database`);
+                return data;
                 
             } catch (error) {
-                console.error('Error loading from database:', error);
-                loading.classList.remove('active');
-                emptyState.classList.add('active');
+                console.error(`Error loading page ${page}:`, error);
+                return null;
             }
         }
 
@@ -1548,17 +1758,23 @@
             }
         }
 
-        // Load property details with CONCURRENT batches (NEW OPTIMIZED APPROACH)
+        // Load property details with CONCURRENT batches (OPTIMIZED FOR SPEED)
         async function loadDetailsConcurrently(urls) {
-            const batchSize = 50; // Larger batches since backend is concurrent
-            const maxConcurrent = 3; // Process 3 batches at the same time!
+            const batchSize = 20; // Properties per chunk
+            const maxConcurrent = 6; // Chunks processed simultaneously
             let processed = 0;
             const totalBatches = Math.ceil(urls.length / batchSize);
+            const startTime = Date.now();
             
             console.log(`Starting concurrent loading: ${urls.length} properties in ${totalBatches} batches, ${maxConcurrent} at a time`);
+            
+            // Show progress bar
+            showProgressBar(urls.length, totalBatches);
 
             // Process batches with concurrency limit
             for (let i = 0; i < totalBatches; i += maxConcurrent) {
+                const currentChunkSet = Math.floor(i / maxConcurrent) + 1;
+                
                 // Create array of batch promises (up to maxConcurrent)
                 const batchPromises = [];
                 
@@ -1572,21 +1788,58 @@
                     const batchPromise = fetchBatch(batch, batchIndex + 1, totalBatches)
                         .then(result => {
                             if (result.success && result.properties) {
+                                console.log(`✓ Chunk ${batchIndex + 1}/${totalBatches} completed: ${result.properties.length} properties`);
+                                
+                                // Debug: Check first property in batch
+                                if (result.properties.length > 0) {
+                                    const firstProp = result.properties[0];
+                                    console.log(`Sample property from chunk ${batchIndex + 1}:`, {
+                                        id: firstProp.id,
+                                        images: firstProp.images?.length || 0,
+                                        soldProperties: firstProp.sold_properties?.length || 0,
+                                        hasImages: !!firstProp.images,
+                                        hasSold: !!firstProp.sold_properties,
+                                        fullProperty: firstProp
+                                    });
+                                }
+                                
                                 // Update properties with full details
                                 result.properties.forEach(prop => {
                                     const index = loadedProperties.findIndex(p => p.url === prop.url);
                                     if (index !== -1) {
-                                        loadedProperties[index] = {...loadedProperties[index], ...prop, loading: false};
-                                        updatePropertyCard(loadedProperties[index]);
+                                        // CRITICAL: Ensure images and sold_properties from backend are preserved
+                                        // The spread operator should merge everything, but let's be explicit
+                                        const mergedProperty = {
+                                            ...loadedProperties[index], 
+                                            ...prop, 
+                                            loading: false,
+                                            // Explicitly ensure these arrays are set
+                                            images: prop.images || [],
+                                            sold_properties: prop.sold_properties || []
+                                        };
+                                        
+                                        loadedProperties[index] = mergedProperty;
+                                        
+                                        // Debug: Verify merged data
+                                        console.log(`Merged property ${prop.id}:`, {
+                                            id: mergedProperty.id,
+                                            images: mergedProperty.images?.length || 0,
+                                            sold: mergedProperty.sold_properties?.length || 0
+                                        });
+                                        
+                                        updatePropertyCard(mergedProperty);
                                         processed++;
                                         loadedCount.textContent = processed;
                                     }
                                 });
+                                
+                                // Update progress after each chunk completes
+                                updateProgress(processed, urls.length, startTime, batchIndex + 1, totalBatches);
                             }
                             return result;
                         })
                         .catch(err => {
-                            console.error(`Batch ${batchIndex + 1} failed:`, err);
+                            console.error(`Chunk ${batchIndex + 1} failed:`, err);
                             return { success: false, error: err.message };
                         });
                     
@@ -1594,12 +1847,73 @@
                 }
                 
                 // Wait for all concurrent batches to complete
-                console.log(`Processing batches ${i + 1} to ${Math.min(i + maxConcurrent, totalBatches)} concurrently...`);
+                console.log(`Processing chunks ${i + 1} to ${Math.min(i + maxConcurrent, totalBatches)} concurrently...`);
                 await Promise.all(batchPromises);
             }
 
+            // Hide progress bar and show completion
+            hideProgressBar();
             syncBtn.disabled = false;
-            showAlert('success', `All ${processed} properties loaded successfully! 🎉`);
+            showAlert('success', `✓ Import complete! ${processed} properties with full data loaded 🎉`);
+        }
+        
+        // Progress Bar Helper Functions
+        function showProgressBar(total, chunks) {
+            importProgress.classList.add('active');
+            totalPropertiesEl.textContent = total;
+            totalChunksEl.textContent = chunks;
+            currentChunkEl.textContent = '0';
+            propertiesImported.textContent = '0';
+            progressBarFill.style.width = '0%';
+            progressPercentage.textContent = '0%';
+            importSpeed.textContent = '';
+            importETA.textContent = '';
+        }
+        
+        function updateProgress(current, total, startTime, currentChunk, totalChunks) {
+            // Update chunk counter
+            currentChunkEl.textContent = currentChunk;
+            
+            // Update properties count
+            propertiesImported.textContent = current;
+            
+            // Calculate and update percentage
+            const percentage = Math.round((current / total) * 100);
+            progressBarFill.style.width = `${percentage}%`;
+            progressPercentage.textContent = `${percentage}%`;
+            
+            // Calculate speed (properties per second)
+            const elapsed = (Date.now() - startTime) / 1000; // seconds
+            const speed = current / elapsed;
+            importSpeed.textContent = `${speed.toFixed(1)} props/sec`;
+            
+            // Calculate ETA
+            if (current < total && speed > 0) {
+                const remaining = total - current;
+                const etaSeconds = remaining / speed;
+                importETA.textContent = formatETA(etaSeconds);
+            } else {
+                importETA.textContent = '';
+            }
+        }
+        
+        function hideProgressBar() {
+            setTimeout(() => {
+                importProgress.classList.remove('active');
+            }, 3000); // Keep visible for 3 seconds after completion
+        }
+        
+        function formatETA(seconds) {
+            if (seconds < 60) {
+                return `~${Math.ceil(seconds)}s remaining`;
+            } else if (seconds < 3600) {
+                const minutes = Math.ceil(seconds / 60);
+                return `~${minutes}m remaining`;
+            } else {
+                const hours = Math.floor(seconds / 3600);
+                const minutes = Math.ceil((seconds % 3600) / 60);
+                return `~${hours}h ${minutes}m remaining`;
+            }
         }
 
         // Fetch a single batch of properties
@@ -1613,7 +1927,10 @@
                         'Content-Type': 'application/json',
                         'X-CSRF-TOKEN': '{{ csrf_token() }}'
                     },
-                    body: JSON.stringify({ urls: batch })
+                    body: JSON.stringify({ 
+                        urls: batch,
+                        filter_id: window.searchContext ? window.searchContext.id : null
+                    })
                 });
 
                 if (!response.ok) {
@@ -1633,12 +1950,42 @@
 
         // Update a single property card with new data
         function updatePropertyCard(property) {
+            // Debug: Log what data we're receiving
+            console.log(`Updating card for property ${property.id}:`, {
+                hasImages: property.images && property.images.length > 0,
+                imageCount: property.images?.length || 0,
+                hasSoldData: property.sold_properties && property.sold_properties.length > 0,
+                soldCount: property.sold_properties?.length || 0,
+                loading: property.loading,
+                fullProperty: property
+            });
+            
+            // IMPORTANT: Ensure we have the full property data with images and sold_properties
+            // The backend sends this data, but we need to make sure it's merged properly
+            if (!property.images) {
+                console.warn(`Property ${property.id} has no images array`);
+                property.images = [];
+            }
+            if (!property.sold_properties) {
+                console.warn(`Property ${property.id} has no sold_properties array`);
+                property.sold_properties = [];
+            }
+            
             const card = document.getElementById(`card-${property.id}`);
             if (card) {
+                // Create new card HTML with full data
                 const newCardHTML = createPropertyCard(property, 0);
                 const tempDiv = document.createElement('div');
                 tempDiv.innerHTML = newCardHTML;
-                card.parentNode.replaceChild(tempDiv.firstElementChild, card);
+                const newCard = tempDiv.firstElementChild;
+                
+                // Replace the card
+                card.parentNode.replaceChild(newCard, card);
+                
+                // Log successful update
+                console.log(`✓ Card updated for property ${property.id} with ${property.images.length} images and ${property.sold_properties.length} sold properties`);
+            } else {
+                console.warn(`Card not found for property ${property.id}`);
             }
         }
 
@@ -2144,8 +2491,69 @@
             urlDisplay.style.display = 'flex';
         }
 
+        // Import sold data in background after main property import
+        async function importSoldDataInBackground() {
+            try {
+                console.log('🔄 importSoldDataInBackground: Starting...');
+                showAlert('success', 'Loading sold property data in background...');
+                
+                console.log('🔄 Calling /api/internal-property/process-sold-links...');
+                
+                // Call the existing processSoldLinks endpoint
+                const response = await fetch('/api/internal-property/process-sold-links', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                    }
+                });
+                
+                console.log('📡 Response received:', response.status, response.statusText);
+                
+                // Get response text first to see what we got
+                const responseText = await response.text();
+                console.log('📄 Response text (first 500 chars):', responseText.substring(0, 500));
+                
+                if (!response.ok) {
+                    console.error('❌ HTTP Error:', response.status, responseText);
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                // Try to parse as JSON
+                let data;
+                try {
+                    data = JSON.parse(responseText);
+                    console.log('📦 Response data:', data);
+                } catch (parseError) {
+                    console.error('❌ Failed to parse JSON:', parseError);
+                    console.error('Response was:', responseText);
+                    throw new Error('Server returned invalid JSON (probably an error page)');
+                }
+                
+                if (data.success) {
+                    console.log(`✅ Sold data import complete: ${data.sold_properties} sold properties with ${data.sold_prices} price records`);
+                    showAlert('success', `Sold data loaded! ${data.sold_properties} sold properties with ${data.sold_prices} price records. Refreshing display...`);
+                    
+                    console.log('🔄 Reloading properties from database...');
+                    // Reload properties from database to get the sold data
+                    await loadFromDatabaseOnStartup();
+                    console.log('✅ Properties reloaded with sold data');
+                } else {
+                    console.warn('⚠️ Sold data import returned false success:', data.message);
+                    showAlert('success', 'Properties loaded. Sold data will be available after background processing.');
+                }
+                
+            } catch (error) {
+                console.error('❌ Error importing sold data:', error);
+                console.error('Error details:', error.message, error.stack);
+                // Show error for debugging
+                showAlert('error', `Sold data import failed: ${error.message}`);
+            }
+        }
+
         // Alert helper
         function showAlert(type, message) {
+
             const alert = type === 'success' ? successAlert : errorAlert;
             alert.textContent = message;
             alert.classList.add('active');
