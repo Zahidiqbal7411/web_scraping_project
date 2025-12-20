@@ -139,11 +139,18 @@ class InternalPropertyController extends Controller
      * @param \Illuminate\Database\Eloquent\Collection $properties Properties with images and soldProperties.prices loaded
      * @return array Formatted properties array
      */
-    private function formatPropertiesForResponse($properties)
+    /**
+     * Format properties for response, ensuring original URLs are preserved
+     * 
+     * @param \Illuminate\Support\Collection $properties
+     * @param array $urlMap Mapping of property_id to original URL
+     * @return array
+     */
+    private function formatPropertiesForResponse($properties, $urlMap = [])
     {
-        return $properties->map(function($prop) {
-            // Build URL from property_id
-            $url = "https://www.rightmove.co.uk/properties/{$prop->property_id}";
+        return $properties->map(function($prop) use ($urlMap) {
+            // Use the original URL if available in the map, otherwise build one
+            $url = $urlMap[$prop->property_id] ?? "https://www.rightmove.co.uk/properties/{$prop->property_id}";
             
             // Get images
             $images = $prop->images ? $prop->images->pluck('image_link')->toArray() : [];
@@ -164,38 +171,96 @@ class InternalPropertyController extends Controller
             // Format sold properties with their prices for JavaScript consumption
             // Also deduplicate by location to prevent same property showing multiple times
             $soldProperties = [];
+            $totalSalesInPeriod = 0;
+            $salesCountInPeriod = 0;
+            $avgSoldPrice = 0;
+            $discountMetric = 0;
+            
             if ($prop->soldProperties && $prop->soldProperties->count() > 0) {
                 Log::info("Property {$prop->property_id} has {$prop->soldProperties->count()} sold properties via relationship");
+                
+                // Group by location to find the unique properties
+                $uniqueLatestSalesInPeriod = [];
+                
                 $soldProperties = $prop->soldProperties
-                    ->unique('location')  // Deduplicate by location
+                    ->unique('location')  // Deduplicate by location for the list
                     ->values()
-                    ->map(function($sold) {
+                    ->map(function($sold) use (&$uniqueLatestSalesInPeriod) {
+                    $latestSaleInPeriod = null;
+                    $latestTimestamp = 0;
+                    
+                    $prices = $sold->prices ? $sold->prices->map(function($price) use (&$latestSaleInPeriod, &$latestTimestamp) {
+                        // Parse date for period check (Jan 2020 - Dec 2025)
+                        $timestamp = strtotime($price->sold_date);
+                        if ($timestamp) {
+                            $year = (int)date('Y', $timestamp);
+                            if ($year >= 2020 && $year <= 2025) {
+                                if ($timestamp > $latestTimestamp) {
+                                    $latestTimestamp = $timestamp;
+                                    $numericPrice = floatval(preg_replace('/[^\d.]/', '', $price->sold_price));
+                                    $latestSaleInPeriod = $numericPrice;
+                                }
+                            }
+                        }
+                        
+                        return [
+                            'sold_price' => $price->sold_price,
+                            'sold_date' => $price->sold_date
+                        ];
+                    })->toArray() : [];
+                    
+                    if ($latestSaleInPeriod) {
+                        $uniqueLatestSalesInPeriod[] = $latestSaleInPeriod;
+                    }
+                    
                     return [
                         'id' => $sold->id,
                         'property_id' => $sold->property_id,
                         'location' => $sold->location,
+                        'house_number' => $sold->house_number,
+                        'road_name' => $sold->road_name,
+                        'image_url' => $sold->image_url,
                         'property_type' => $sold->property_type,
                         'bedrooms' => $sold->bedrooms,
                         'bathrooms' => $sold->bathrooms,
                         'tenure' => $sold->tenure,
                         'detail_url' => $sold->detail_url,
-                        'prices' => $sold->prices ? $sold->prices->map(function($price) {
-                            return [
-                                'sold_price' => $price->sold_price,
-                                'sold_date' => $price->sold_date
-                            ];
-                        })->toArray() : []
+                        'prices' => $prices
                     ];
                 })->toArray();
+                
+                if (count($uniqueLatestSalesInPeriod) > 0) {
+                    $avgSoldPrice = round(array_sum($uniqueLatestSalesInPeriod) / count($uniqueLatestSalesInPeriod));
+                    $salesCountInPeriod = count($uniqueLatestSalesInPeriod);
+                    
+                    // Parse advertised price
+                    $advertisedPriceStr = $prop->price ?? '';
+                    $advertisedPrice = floatval(preg_replace('/[^\d.]/', '', $advertisedPriceStr));
+                    
+                    if ($advertisedPrice > 0 && $avgSoldPrice > 0) {
+                        $discountMetric = (($avgSoldPrice - $advertisedPrice) / $avgSoldPrice) * 100;
+                    }
+                }
             } else {
                 // Debug: Log why no sold properties are found
                 Log::info("Property {$prop->property_id} has no sold properties. sold_link: " . ($prop->sold_link ?? 'NULL'));
             }
             
+            // Extract house number and road name
+            $address = $prop->location ?? 'Unknown location';
+            $houseNumber = '';
+            $roadName = $address;
+            if (preg_match('/^(\d+[A-Za-z]?),\s*(.*)$/', $address, $matches)) {
+                $houseNumber = $matches[1];
+                $roadName = $matches[2];
+            }
+
             return [
                 'id' => $prop->property_id,
                 'url' => $url,
-                'address' => $prop->location ?? 'Unknown location',
+                'address' => $address,
+                'house_number' => $houseNumber,
+                'road_name' => $roadName,
                 'price' => $prop->price ?? 'Price on request',
                 'property_type' => $prop->property_type ?? '',
                 'bedrooms' => $prop->bedrooms ?? '',
@@ -213,6 +278,9 @@ class InternalPropertyController extends Controller
                 'key_features' => $keyFeatures,
                 'sold_link' => $prop->sold_link ?? null,
                 'sold_properties' => $soldProperties,
+                'average_sold_price' => $avgSoldPrice,
+                'sales_count_in_period' => $salesCountInPeriod,
+                'discount_metric' => round($discountMetric, 1),
                 'images' => $images,
                 'loading' => false, // Data is fully loaded from DB
                 'from_database' => true
@@ -428,21 +496,35 @@ class InternalPropertyController extends Controller
                         // Disable foreign key checks for clean truncation
                         \DB::statement('SET FOREIGN_KEY_CHECKS=0;');
                         
-                        // Truncate in order: child tables first, then parent tables
-                        PropertySoldPrice::truncate();
-                        Log::info("Truncated properties_sold_prices table");
-                        
-                        PropertySold::truncate();
-                        Log::info("Truncated properties_sold table");
-                        
-                        \App\Models\PropertyImage::truncate();
-                        Log::info("Truncated property_images table");
-                        
-                        Url::truncate();
-                        Log::info("Truncated urls table");
-                        
-                        \App\Models\Property::truncate();
-                        Log::info("Truncated properties table");
+                        try {
+                            // Truncate in order: child tables first, then parent tables
+                            \App\Models\PropertySoldPrice::truncate();
+                            Log::info("Truncated properties_sold_prices table");
+                            
+                            \App\Models\PropertySold::truncate();
+                            Log::info("Truncated properties_sold table");
+                            
+                            \App\Models\PropertyImage::truncate();
+                            Log::info("Truncated property_images table");
+                            
+                            \App\Models\Url::truncate();
+                            Log::info("Truncated urls table");
+                            
+                            \App\Models\Property::truncate();
+                            Log::info("Truncated properties table");
+                            
+                            Log::info("Successfully truncated all data tables");
+                        } catch (\Exception $truncateEx) {
+                            Log::error("Error during truncation: " . $truncateEx->getMessage());
+                            
+                            // Fallback to delete if truncate fails
+                            \App\Models\PropertySoldPrice::query()->delete();
+                            \App\Models\PropertySold::query()->delete();
+                            \App\Models\PropertyImage::query()->delete();
+                            \App\Models\Url::query()->delete();
+                            \App\Models\Property::query()->delete();
+                            Log::info("Fallback: Deleted all data instead of truncation");
+                        }
                         
                         // Re-enable foreign key checks
                         \DB::statement('SET FOREIGN_KEY_CHECKS=1;');
@@ -590,6 +672,8 @@ class InternalPropertyController extends Controller
                                 ['property_id' => $propId],
                                 [
                                     'location' => $propData['address'] ?? '',
+                                    'house_number' => $propData['house_number'] ?? '',
+                                    'road_name' => $propData['road_name'] ?? '',
                                     'price' => $propData['price'] ?? '',
                                     'key_features' => $propData['key_features'] ?? [],
                                     'description' => $propData['description'] ?? '', 
@@ -724,53 +808,52 @@ class InternalPropertyController extends Controller
                 // Get the property IDs that were just processed
                 $propertyIds = [];
                 foreach ($result['properties'] as $propData) {
-                    if (preg_match('/properties\/(\d+)/', $propData['url'], $matches)) {
+                    if (isset($propData['id']) && !empty($propData['id'])) {
+                        $propertyIds[] = $propData['id'];
+                    } elseif (preg_match('/properties\/(\d+)/', $propData['url'], $matches)) {
                         $propertyIds[] = $matches[1];
                     }
                 }
                 
                 if (!empty($propertyIds)) {
+                    // Create a map of property_id to original URL to ensure frontend matches correctly
+                    $urlMap = [];
+                    foreach ($result['properties'] as $propData) {
+                        $id = $propData['id'] ?? null;
+                        if (!$id && preg_match('/properties\/(\d+)/', $propData['url'], $matches)) {
+                            $id = $matches[1];
+                        }
+                        if ($id) {
+                            $urlMap[$id] = $propData['url'];
+                        }
+                    }
+
                     // Query properties with relationships
                     $dbProperties = \App\Models\Property::whereIn('property_id', $propertyIds)
                         ->with(['images', 'soldProperties.prices'])
                         ->get();
                     
-                    // Format using the shared method
-                    $reloadedProperties = $this->formatPropertiesForResponse($dbProperties);
+                    Log::info("Found " . $dbProperties->count() . " properties in database for reload");
                     
-                    Log::info("Reloaded " . count($reloadedProperties) . " properties from database");
+                    // Format using the shared method, passing the urlMap
+                    $reloadedProperties = $this->formatPropertiesForResponse($dbProperties, $urlMap);
                     
-                    // Debug: Log first property to verify data structure
-                    if (!empty($reloadedProperties)) {
-                        $firstProp = $reloadedProperties[0];
-                        Log::info("Sample reloaded property: ID={$firstProp['id']}, Images=" . count($firstProp['images'] ?? []) . ", Sold=" . count($firstProp['sold_properties'] ?? []));
-                    }
+                    Log::info("Reloaded and formatted " . count($reloadedProperties) . " properties from database");
+                } else {
+                    Log::warning("No property IDs found for database reload");
                 }
             }
 
             // ALWAYS use reloaded properties if available (they have full data with images and sold history)
-            // The scraped properties from $result don't have sold data since that's scraped separately
-            $finalProperties = !empty($reloadedProperties) ? $reloadedProperties : $result['properties'];
+            // If reload fails or is empty, we fall back to scraped data (though it will lack some details)
+            $finalProperties = count($reloadedProperties) > 0 ? $reloadedProperties : $result['properties'];
             
-            // CRITICAL DEBUG: Log what we're actually sending to frontend
-            $sourceType = !empty($reloadedProperties) ? 'reloaded from DB' : 'scraped (NO IMAGES/SOLD DATA)';
-            Log::info("Returning " . count($finalProperties) . " properties to frontend (" . $sourceType . ")");
-            
-            // Debug: Verify first property has images and sold data
-            if (!empty($finalProperties)) {
-                $firstProp = $finalProperties[0];
-                $imageCount = isset($firstProp['images']) ? count($firstProp['images']) : 0;
-                $soldCount = isset($firstProp['sold_properties']) ? count($firstProp['sold_properties']) : 0;
-                Log::info("First property being sent: ID={$firstProp['id']}, Images={$imageCount}, Sold={$soldCount}");
-                
-                // WARNING if data is missing
-                if ($imageCount === 0) {
-                    Log::warning("⚠️  WARNING: First property has NO images! Using: " . $sourceType);
-                }
-                if ($soldCount === 0 && !empty($firstProp['sold_link'])) {
-                    Log::warning("⚠️  WARNING: First property has sold_link but NO sold_properties data! Using: " . $sourceType);
-                }
+            // Final check: if we're sending scraped data, warn that it might be incomplete
+            if (count($reloadedProperties) === 0 && $result['processed'] > 0) {
+                Log::warning("Returning scraped data instead of reloaded database data. Images and sold info might be missing.");
             }
+            
+            Log::info("Returning " . count($finalProperties) . " properties to frontend (" . (count($reloadedProperties) > 0 ? 'reloaded from DB' : 'scraped') . ")");
             
             return response()->json([
                 'success' => true,
@@ -925,6 +1008,9 @@ class InternalPropertyController extends Controller
                                 ],
                                 [
                                     'source_sold_link' => $property->sold_link,
+                                    'house_number' => $soldProp['house_number'] ?? '',
+                                    'road_name' => $soldProp['road_name'] ?? '',
+                                    'image_url' => $soldProp['image_url'] ?? null,
                                     'property_type' => $soldProp['property_type'] ?? '',
                                     'bedrooms' => $soldProp['bedrooms'],
                                     'bathrooms' => $soldProp['bathrooms'],

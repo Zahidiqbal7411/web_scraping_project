@@ -62,10 +62,24 @@
             left: 0;
             top: 0;
             z-index: 50;
+            transition: width 0.3s ease;
+        }
+
+        .sidebar.collapsed {
+            width: 70px;
+        }
+
+        .sidebar-toggle {
+            padding: 1rem;
+            display: flex;
+            justify-content: center;
+            cursor: pointer;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--card-border);
         }
 
         .sidebar-menu {
-            padding: 2rem 1rem;
+            padding: 1rem 0.5rem;
             display: flex;
             flex-direction: column;
             gap: 0.5rem;
@@ -81,6 +95,17 @@
             border-radius: 8px;
             font-weight: 500;
             transition: all 0.2s ease;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+
+        .sidebar.collapsed .sidebar-item {
+            padding: 0.875rem;
+            justify-content: center;
+        }
+
+        .sidebar.collapsed .sidebar-item span {
+            display: none;
         }
 
         .sidebar-item:hover, .sidebar-item.active {
@@ -105,6 +130,11 @@
             display: flex;
             flex-direction: column;
             min-height: 100vh;
+            transition: margin-left 0.3s ease;
+        }
+
+        .content-area.sidebar-collapsed {
+            margin-left: 70px;
         }
 
         /* Navbar (Header) */
@@ -197,5 +227,29 @@
     </div>
     
     @yield('scripts')
+    <script>
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const contentArea = document.querySelector('.content-area');
+            
+            sidebar.classList.toggle('collapsed');
+            contentArea.classList.toggle('sidebar-collapsed');
+            
+            // Store preference in localStorage
+            localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+        }
+
+        // Apply stored preference on load
+        document.addEventListener('DOMContentLoaded', () => {
+            const sidebar = document.getElementById('sidebar');
+            const contentArea = document.querySelector('.content-area');
+            const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+            
+            if (isCollapsed) {
+                sidebar.classList.add('collapsed');
+                contentArea.classList.add('sidebar-collapsed');
+            }
+        });
+    </script>
 </body>
 </html>

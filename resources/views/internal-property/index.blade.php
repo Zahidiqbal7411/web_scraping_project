@@ -106,14 +106,43 @@
             background: var(--card-bg);
             border: 1px solid var(--card-border);
             border-radius: 8px;
-            padding: 1.25rem;
+            padding: 1rem 1.25rem;
             margin-bottom: 2rem;
             display: flex;
             justify-content: space-between;
             align-items: center;
             box-shadow: var(--shadow-sm);
             flex-wrap: wrap;
-            gap: 1rem;
+            gap: 1.5rem;
+        }
+
+        .stat-items-group {
+            display: flex;
+            gap: 2rem;
+            align-items: center;
+        }
+
+        .sort-group {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .sort-select {
+            padding: 0.5rem 1rem;
+            border: 1px solid var(--card-border);
+            border-radius: 6px;
+            background: white;
+            color: var(--text-primary);
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .sort-select:focus {
+            border-color: var(--primary);
         }
 
         .stat-item {
@@ -275,10 +304,37 @@
         }
 
         .property-info-section {
-            padding: 1.5rem;
+            padding: 1.25rem;
             flex: 1;
             display: flex;
             flex-direction: column;
+            position: relative;
+        }
+
+        .discount-badge {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: var(--success);
+            color: white;
+            padding: 0.35rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            box-shadow: var(--shadow-sm);
+            z-index: 5;
+        }
+
+        .address-house {
+            color: var(--primary);
+            font-weight: 700;
+            font-size: 1.1rem;
+            margin-right: 0.25rem;
+        }
+
+        .address-road {
+            color: var(--text-primary);
+            font-weight: 600;
         }
 
         /* Average Sold Price Display */
@@ -365,8 +421,30 @@
             background: white;
             border: 1px solid var(--card-border);
             border-radius: 8px;
-            padding: 0.75rem;
+            padding: 0.5rem;
             box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        .sold-property-photo {
+            flex: 0 0 80px;
+            width: 80px;
+            height: 60px;
+            border-radius: 4px;
+            overflow: hidden;
+            background: #eee;
+        }
+
+        .sold-property-photo img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .sold-property-main {
+            flex: 1;
+            min-width: 0;
         }
         
         /* Sold Property Info Section (TOP) */
@@ -1475,13 +1553,28 @@
 
         <!-- Stats Bar -->
         <div class="stats-bar" id="statsBar" style="display: none;">
-            <div class="stat-item">
-                <span class="stat-label">Total Properties</span>
-                <span class="stat-value" id="totalCount">0</span>
+            <div class="stat-items-group">
+                <div class="stat-item">
+                    <span class="stat-label">Total Properties</span>
+                    <span class="stat-value" id="totalCount">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Loaded</span>
+                    <span class="stat-value" id="loadedCount">0</span>
+                </div>
             </div>
-            <div class="stat-item">
-                <span class="stat-label">Loaded</span>
-                <span class="stat-value" id="loadedCount">0</span>
+            
+            <div class="sort-group">
+                <label for="sortSelect" class="stat-label">Sort by:</label>
+                <select id="sortSelect" class="sort-select" onchange="handleSortChange()">
+                    <option value="default">Default</option>
+                    <option value="price_low">Price (Low to High)</option>
+                    <option value="price_high">Price (High to Low)</option>
+                    <option value="avg_price_low">Avg Sold Price (Low to High)</option>
+                    <option value="avg_price_high">Avg Sold Price (High to Low)</option>
+                    <option value="discount_high">Highest Discount %</option>
+                    <option value="road_asc">Road Name (A-Z)</option>
+                </select>
             </div>
         </div>
 
@@ -1805,10 +1898,15 @@
                                 
                                 // Update properties with full details
                                 result.properties.forEach(prop => {
-                                    const index = loadedProperties.findIndex(p => p.url === prop.url);
+                                    // Match by URL OR by property ID (more robust fallback)
+                                    let index = loadedProperties.findIndex(p => p.url === prop.url);
+                                    
+                                    if (index === -1 && prop.id) {
+                                        index = loadedProperties.findIndex(p => p.id == prop.id || (p.url && p.url.includes(prop.id)));
+                                    }
+
                                     if (index !== -1) {
                                         // CRITICAL: Ensure images and sold_properties from backend are preserved
-                                        // The spread operator should merge everything, but let's be explicit
                                         const mergedProperty = {
                                             ...loadedProperties[index], 
                                             ...prop, 
@@ -1824,12 +1922,15 @@
                                         console.log(`Merged property ${prop.id}:`, {
                                             id: mergedProperty.id,
                                             images: mergedProperty.images?.length || 0,
-                                            sold: mergedProperty.sold_properties?.length || 0
+                                            sold: mergedProperty.sold_properties?.length || 0,
+                                            urlMatch: loadedProperties[index].url === prop.url
                                         });
                                         
                                         updatePropertyCard(mergedProperty);
                                         processed++;
                                         loadedCount.textContent = processed;
+                                    } else {
+                                        console.warn(`Could not find placeholder for property ${prop.id} / ${prop.url}`);
                                     }
                                 });
                                 
@@ -1971,7 +2072,19 @@
                 property.sold_properties = [];
             }
             
-            const card = document.getElementById(`card-${property.id}`);
+            let card = document.getElementById(`card-${property.id}`);
+            
+            // Fallback: search by URL if ID lookup fails (common during initial import)
+            if (!card) {
+                const urlLink = document.querySelector(`a[href="${property.url}"]`);
+                if (urlLink) {
+                    card = urlLink.closest('.property-card');
+                    if (card) {
+                        console.log(`✓ Card found via URL for property ${property.id}`);
+                    }
+                }
+            }
+            
             if (card) {
                 // Create new card HTML with full data
                 const newCardHTML = createPropertyCard(property, 0);
@@ -1985,7 +2098,7 @@
                 // Log successful update
                 console.log(`✓ Card updated for property ${property.id} with ${property.images.length} images and ${property.sold_properties.length} sold properties`);
             } else {
-                console.warn(`Card not found for property ${property.id}`);
+                console.warn(`Card not found for property ${property.id} (tried ID and URL search)`);
             }
         }
 
@@ -2162,6 +2275,54 @@
         }
 
         // Create property card HTML - matches screenshot design exactly
+        // Sorting Handlers
+        function handleSortChange() {
+            const sortType = document.getElementById('sortSelect').value;
+            sortProperties(sortType);
+        }
+
+        function sortProperties(type) {
+            let sorted = [...loadedProperties];
+            
+            switch(type) {
+                case 'price_low':
+                    sorted.sort((a, b) => parseNumericPrice(a.price) - parseNumericPrice(b.price));
+                    break;
+                case 'price_high':
+                    sorted.sort((a, b) => parseNumericPrice(b.price) - parseNumericPrice(a.price));
+                    break;
+                case 'avg_price_low':
+                    sorted.sort((a, b) => (parseFloat(a.average_sold_price) || 0) - (parseFloat(b.average_sold_price) || 0));
+                    break;
+                case 'avg_price_high':
+                    sorted.sort((a, b) => (parseFloat(b.average_sold_price) || 0) - (parseFloat(a.average_sold_price) || 0));
+                    break;
+                case 'discount_high':
+                    sorted.sort((a, b) => (parseFloat(b.discount_metric) || 0) - (parseFloat(a.discount_metric) || 0));
+                    break;
+                case 'road_asc':
+                    sorted.sort((a, b) => {
+                        const roadA = (a.road_name || a.address || '').toLowerCase();
+                        const roadB = (b.road_name || b.address || '').toLowerCase();
+                        return roadA.localeCompare(roadB);
+                    });
+                    break;
+                default:
+                    // Default order (usually chronological or by ID)
+                    break;
+            }
+            
+            currentPage = 1;
+            displayProperties(sorted);
+        }
+
+        function parseNumericPrice(priceStr) {
+            if (!priceStr) return 0;
+            if (typeof priceStr === 'number') return priceStr;
+            const numeric = parseFloat(priceStr.replace(/[£,]/g, ''));
+            return isNaN(numeric) ? 0 : numeric;
+        }
+
         function createPropertyCard(property, index) {
             const hasImages = property.images && property.images.length > 0;
             const imageCount = hasImages ? property.images.length : 0;
@@ -2169,6 +2330,11 @@
             
             // Use first image or placeholder
             const mainImage = hasImages ? property.images[0] : `https://via.placeholder.com/600x400/e0e0e0/666666?text=Loading+Image`;
+
+            // Format address with house number if possible
+            const houseNumber = property.house_number || '';
+            const roadName = property.road_name || property.address || '';
+            const displayAddress = houseNumber ? `<span class="address-house">${houseNumber},</span> <span class="address-road">${roadName}</span>` : roadName;
 
             // Create property card HTML - Split Layout
             return `
@@ -2197,7 +2363,13 @@
                         </div>
                         
                         <div class="property-info-section">
-                            <h3 class="property-address-title">${property.address}</h3>
+                            ${property.discount_metric && property.discount_metric > 0 ? `
+                                <div class="discount-badge">
+                                    ${property.discount_metric}% Discount
+                                </div>
+                            ` : ''}
+                            
+                            <h3 class="property-address-title">${displayAddress}</h3>
                             <div class="property-url-wrapper" onclick="event.stopPropagation()">
                                 <div class="property-url-display" id="url-display-${property.id}">
                                     <div class="property-url" title="${property.url}">
@@ -2226,36 +2398,16 @@
                             </div>
                             
                             ${(() => {
-                                // Calculate average sold price from all sold properties
-                                if (property.sold_properties && property.sold_properties.length > 0) {
-                                    let totalPrice = 0;
-                                    let priceCount = 0;
-                                    
-                                    property.sold_properties.forEach(sold => {
-                                        if (sold.prices && sold.prices.length > 0) {
-                                            sold.prices.forEach(price => {
-                                                // Parse the price (remove £, commas, and convert to number)
-                                                const priceStr = price.sold_price || '';
-                                                const numericPrice = parseFloat(priceStr.replace(/[£,]/g, ''));
-                                                if (!isNaN(numericPrice) && numericPrice > 0) {
-                                                    totalPrice += numericPrice;
-                                                    priceCount++;
-                                                }
-                                            });
-                                        }
-                                    });
-                                    
-                                    if (priceCount > 0) {
-                                        const avgPrice = Math.round(totalPrice / priceCount);
-                                        const formattedAvg = '£' + avgPrice.toLocaleString('en-GB');
-                                        return `
-                                            <div class="avg-sold-price">
-                                                <span class="avg-label">Avg Sold Price</span>
-                                                <span class="avg-value">${formattedAvg}</span>
-                                                <span class="avg-count">(${priceCount} sale${priceCount > 1 ? 's' : ''})</span>
-                                            </div>
-                                        `;
-                                    }
+                                if (property.average_sold_price && property.average_sold_price > 0) {
+                                    const formattedAvg = '£' + Math.round(property.average_sold_price).toLocaleString('en-GB');
+                                    const count = property.sales_count_in_period || 0;
+                                    return `
+                                        <div class="avg-sold-price">
+                                            <span class="avg-label">Avg Sold Price</span>
+                                            <span class="avg-value">${formattedAvg}</span>
+                                            <span class="avg-count">(${count} sale${count !== 1 ? 's' : ''} in period)</span>
+                                        </div>
+                                    `;
                                 }
                                 return '';
                             })()}
@@ -2333,30 +2485,36 @@
                             ${property.sold_properties && property.sold_properties.length > 0 ? 
                                 property.sold_properties.map(sold => {
                                     const soldLink = sold.detail_url || property.sold_link || '#';
+                                    const soldPhoto = sold.image_url || 'https://via.placeholder.com/80x60/eee/999?text=No+Photo';
+                                    const soldHouse = sold.house_number || '';
+                                    const soldRoad = sold.road_name || sold.location || '';
+                                    
                                     return `
                                     <a href="${soldLink}" target="_blank" class="sold-item-card-link" onclick="event.stopPropagation()">
                                         <div class="sold-item-card">
-                                            <!-- Property Details (TOP) -->
-                                            <div class="sold-property-info">
-                                                <div class="sold-property-type">${sold.property_type || 'Property'} (${sold.tenure || 'Unknown'})</div>
-                                                <div class="sold-property-details">
-                                                    <span>🛏️ ${sold.bedrooms || '-'} Beds</span>
-                                                    <span>🛁 ${sold.bathrooms || '-'} Baths</span>
+                                            <div class="sold-property-photo">
+                                                <img src="${soldPhoto}" alt="Property" loading="lazy" onerror="this.src='https://via.placeholder.com/80x60/eee/999?text=No+Photo'">
+                                            </div>
+                                            <div class="sold-property-main">
+                                                <div class="sold-property-type" style="font-size: 0.75rem; margin-bottom: 2px;">
+                                                    ${sold.property_type || 'Property'} (${sold.tenure || 'Unknown'})
+                                                </div>
+                                                <div style="font-size: 0.8rem; font-weight: 600; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${soldHouse ? soldHouse + ', ' : ''}${soldRoad}">
+                                                    ${soldHouse ? soldHouse + ', ' : ''}${soldRoad}
+                                                </div>
+                                                
+                                                <!-- Prices below -->
+                                                <div class="sold-prices-section">
+                                                    ${sold.prices && sold.prices.length > 0 ? 
+                                                        sold.prices.slice(0, 3).map(price => `
+                                                            <div class="sold-history-row">
+                                                                <span>${price.sold_date || '-'}</span>
+                                                                <span class="sold-history-price">${price.sold_price || '-'}</span>
+                                                            </div>
+                                                        `).join('') + (sold.prices.length > 3 ? `<div style="font-size:0.6rem; text-align:center; color:var(--text-secondary); margin-top:2px;">+ ${sold.prices.length - 3} more</div>` : '')
+                                                    : `<div style="font-size:0.7rem; color:var(--text-secondary);">No price data</div>`}
                                                 </div>
                                             </div>
-                                            
-                                            <!-- All Prices (BELOW) -->
-                                            ${sold.prices && sold.prices.length > 0 ? `
-                                                <div class="sold-prices-section">
-                                                    <div class="sold-prices-title">Sale History</div>
-                                                    ${sold.prices.map(price => `
-                                                        <div class="sold-history-row">
-                                                            <span>${price.sold_date || '-'}</span>
-                                                            <span class="sold-history-price">${price.sold_price || '-'}</span>
-                                                        </div>
-                                                    `).join('')}
-                                                </div>
-                                            ` : `<div style="font-size:0.75rem; color:var(--text-secondary); font-style:italic;">No price data</div>`}
                                         </div>
                                     </a>
                                     `;
