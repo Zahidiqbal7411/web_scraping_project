@@ -62,7 +62,7 @@
             left: 0;
             top: 0;
             z-index: 50;
-            transition: width 0.3s ease;
+            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .sidebar.collapsed {
@@ -130,7 +130,7 @@
             display: flex;
             flex-direction: column;
             min-height: 100vh;
-            transition: margin-left 0.3s ease;
+            transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .content-area.sidebar-collapsed {

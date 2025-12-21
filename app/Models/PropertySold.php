@@ -19,6 +19,7 @@ class PropertySold extends Model
         'house_number',
         'road_name',
         'image_url',
+        'map_url',
         'property_type',
         'bedrooms',
         'bathrooms',

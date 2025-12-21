@@ -246,15 +246,41 @@
             margin-bottom: 1.5rem;
         }
 
-        /* Properties Grid - 2 Columns (Requested) */
+        /* Properties Grid - Responsive based on Sidebar */
         .properties-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
-            gap: 1rem;
+            gap: 1.5rem;
             margin-bottom: 2rem;
             overflow: hidden;
             width: 100%;
             max-width: 100%;
+            transition: grid-template-columns 0.4s ease;
+        }
+
+        /* MAGIC: When sidebar is collapsed, make the grid 1-column so images are BIG */
+        .sidebar-collapsed .properties-grid {
+            grid-template-columns: 1fr;
+            max-width: 1500px; /* Ultra-wide for premium feel */
+            margin-left: 0; /* Align towards the left (sidebar side) */
+            margin-right: auto;
+            gap: 2rem;
+        }
+
+        .sidebar-collapsed .property-card {
+            min-height: 650px;
+            border-radius: 16px;
+        }
+
+        .sidebar-collapsed .property-sold-sidebar {
+            flex: 0 0 750px; /* Much wider for high-detail view */
+            background: #fbfbfb;
+        }
+
+        .sidebar-collapsed .property-image-wrapper,
+        .sidebar-collapsed .image-nav,
+        .sidebar-collapsed .image-slider-wrapper {
+             aspect-ratio: 16/9; /* Widescreen for BIG effect */
         }
 
         /* Property Card - Split Layout */
@@ -275,19 +301,17 @@
 
         /* Left Side: Property Details */
         .property-main-content {
-            flex: 0 0 60%;
+            flex: 1;
             display: flex;
             flex-direction: column;
             border-right: 1px solid var(--card-border);
             min-width: 0;
-            max-width: 60%;
             overflow: hidden;
         }
 
         /* Right Side: Sold History */
         .property-sold-sidebar {
-            flex: 0 0 40%;
-            max-width: 40%;
+            flex: 0 0 320px;
             background: #fafafa;
             display: flex;
             flex-direction: column;
@@ -364,7 +388,7 @@
 
         /* Sold Sidebar Styles */
         .sold-sidebar-header {
-            padding: 1rem 1.5rem;
+            padding: 1.25rem 1.5rem;
             background: white;
             border-bottom: 1px solid var(--card-border);
             display: flex;
@@ -373,17 +397,14 @@
         }
 
         .sold-sidebar-title {
-            font-size: 1rem;
+            font-size: 1.1rem;
             font-weight: 700;
             color: var(--text-primary);
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
         }
 
         /* Clickable Sold History Title Link */
         .sold-sidebar-title-link {
-            font-size: 1rem;
+            font-size: 1.1rem;
             font-weight: 700;
             color: var(--text-primary);
             display: flex;
@@ -394,46 +415,56 @@
         }
 
         .sold-sidebar-title-link:hover {
-            color: var(--secondary);
-        }
-
-        .sold-sidebar-title-link .link-arrow {
-            opacity: 0.5;
-            transition: opacity 0.2s ease;
-        }
-
-        .sold-sidebar-title-link:hover .link-arrow {
-            opacity: 1;
+            color: var(--primary);
         }
 
         .sold-list-container {
-            padding: 0.75rem;
+            padding: 1rem;
             overflow-y: auto;
             flex: 1;
             display: flex;
             flex-direction: column;
-            gap: 0.75rem;
-            max-height: 500px;
+            gap: 1rem;
+            max-height: 600px;
         }
         
         /* Sold Card Style for Sidebar */
         .sold-item-card {
             background: white;
             border: 1px solid var(--card-border);
-            border-radius: 8px;
-            padding: 0.5rem;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            border-radius: 10px;
+            padding: 0.6rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.03);
             display: flex;
             gap: 0.75rem;
+            transition: all 0.2s ease;
         }
 
+        /* Default (Expanded Sidebar / 2-column grid) Photo Size */
         .sold-property-photo {
-            flex: 0 0 80px;
-            width: 80px;
-            height: 60px;
-            border-radius: 4px;
+            flex: 0 0 90px;
+            width: 90px;
+            height: 65px;
+            border-radius: 6px;
             overflow: hidden;
-            background: #eee;
+            background: #f0f0f0;
+            border: 1px solid var(--card-border);
+            transition: all 0.3s ease;
+        }
+
+        /* BIG Photo when Sidebar is Collapsed - High Definition Size */
+        .sidebar-collapsed .sold-property-photo {
+            flex: 0 0 260px;
+            width: 260px;
+            height: 180px;
+            border-radius: 10px;
+        }
+
+        /* BIG Card Padding when Sidebar is Collapsed */
+        .sidebar-collapsed .sold-item-card {
+            padding: 1.5rem;
+            gap: 2rem;
+            border-radius: 14px;
         }
 
         .sold-property-photo img {
@@ -445,105 +476,74 @@
         .sold-property-main {
             flex: 1;
             min-width: 0;
-        }
-        
-        /* Sold Property Info Section (TOP) */
-        .sold-property-info {
-            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
-            border-radius: 6px;
-            padding: 0.75rem;
-            margin-bottom: 0.75rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
         }
         
         .sold-property-type {
             font-weight: 700;
-            font-size: 0.85rem;
-            color: var(--text-primary);
-            margin-bottom: 0.5rem;
-        }
-        
-        .sold-property-details {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 0.35rem;
             font-size: 0.75rem;
-            color: var(--text-secondary);
-        }
-        
-        .sold-property-details span {
-            display: flex;
-            align-items: center;
-            gap: 0.25rem;
-        }
-        
-        /* Sold Prices Section (BELOW) - scrollable if more than 3 */
-        .sold-prices-section {
-            border-top: 1px dashed var(--card-border);
-            padding-top: 0.5rem;
-            max-height: 120px;
-            overflow-y: auto;
-        }
-        
-        .sold-prices-title {
-            font-size: 0.7rem;
-            font-weight: 600;
             color: var(--text-secondary);
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            margin-bottom: 0.35rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .sold-property-location {
+            font-size: 0.85rem; /* Smaller default for 2-column view */
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 0.25rem;
+            line-height: 1.3;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .sidebar-collapsed .sold-property-location {
+            font-size: 1.15rem; /* Much larger and more prominent */
+            margin-bottom: 1rem;
+            font-weight: 700;
         }
         
-        .sold-history-row {
+        .sidebar-collapsed .sold-property-type {
+            font-size: 0.95rem;
+            margin-bottom: 0.75rem;
+            color: var(--primary);
+        }
+        
+        .sold-property-transactions {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .sold-tx-row {
             display: flex;
             justify-content: space-between;
-            font-size: 0.75rem;
-            color: var(--text-secondary);
+            align-items: center;
+            font-size: 0.8rem; /* Smaller default */
+        }
+
+        .sidebar-collapsed .sold-tx-row {
+            font-size: 0.95rem; /* Larger when sidebar collapsed */
             padding: 0.25rem 0;
-            border-bottom: 1px dotted var(--card-border);
         }
-        
-        .sold-history-row:last-child {
-            border-bottom: none;
+
+        .sold-tx-date {
+            color: var(--text-secondary);
         }
-        
-        .sold-history-price {
+
+        .sold-tx-price {
             font-weight: 700;
             color: var(--primary);
         }
 
-        /* Sold Details Link Button */
-        .sold-details-link {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 0.4rem;
-            width: 100%;
-            padding: 0.5rem;
-            margin-top: 0.75rem;
-            background: var(--secondary);
-            color: white;
-            border: none;
-            border-radius: 6px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            text-decoration: none;
-        }
-        
-        .sold-details-link:hover {
-            background: hsl(200, 70%, 40%);
-            transform: translateY(-1px);
-            box-shadow: 0 2px 4px rgba(0,0,0,0.15);
-        }
-        
-        .sold-details-link svg {
-            flex-shrink: 0;
-        }
-
         /* Sold Sidebar Footer */
         .sold-sidebar-footer {
-            padding: 0.75rem;
+            padding: 1rem;
             border-top: 1px solid var(--card-border);
             background: #f8f9fa;
         }
@@ -585,11 +585,12 @@
         /* Layout Overrides to fill screen but prevent overflow */
         .main-content {
             width: 100% !important;
-            max-width: calc(100vw - 260px) !important; /* Account for sidebar */
+            max-width: 100% !important;
             padding: 1rem !important;
             margin: 0 !important;
             box-sizing: border-box !important;
             overflow-x: hidden !important;
+            transition: all 0.3s ease;
         }
         
         .container {
@@ -1572,7 +1573,8 @@
                     <option value="price_high">Price (High to Low)</option>
                     <option value="avg_price_low">Avg Sold Price (Low to High)</option>
                     <option value="avg_price_high">Avg Sold Price (High to Low)</option>
-                    <option value="discount_high">Highest Discount %</option>
+                    <option value="discount_high">Largest Discount %</option>
+                    <option value="discount_low">Smallest Discount %</option>
                     <option value="road_asc">Road Name (A-Z)</option>
                 </select>
             </div>
@@ -2300,6 +2302,9 @@
                 case 'discount_high':
                     sorted.sort((a, b) => (parseFloat(b.discount_metric) || 0) - (parseFloat(a.discount_metric) || 0));
                     break;
+                case 'discount_low':
+                    sorted.sort((a, b) => (parseFloat(a.discount_metric) || 0) - (parseFloat(b.discount_metric) || 0));
+                    break;
                 case 'road_asc':
                     sorted.sort((a, b) => {
                         const roadA = (a.road_name || a.address || '').toLowerCase();
@@ -2485,7 +2490,7 @@
                             ${property.sold_properties && property.sold_properties.length > 0 ? 
                                 property.sold_properties.map(sold => {
                                     const soldLink = sold.detail_url || property.sold_link || '#';
-                                    const soldPhoto = sold.image_url || 'https://via.placeholder.com/80x60/eee/999?text=No+Photo';
+                                    const soldPhoto = sold.image_url || sold.map_url || 'https://via.placeholder.com/80x60/eee/999?text=No+Photo';
                                     const soldHouse = sold.house_number || '';
                                     const soldRoad = sold.road_name || sold.location || '';
                                     
@@ -2493,26 +2498,25 @@
                                     <a href="${soldLink}" target="_blank" class="sold-item-card-link" onclick="event.stopPropagation()">
                                         <div class="sold-item-card">
                                             <div class="sold-property-photo">
-                                                <img src="${soldPhoto}" alt="Property" loading="lazy" onerror="this.src='https://via.placeholder.com/80x60/eee/999?text=No+Photo'">
+                                                <img src="${soldPhoto}" alt="Property" loading="lazy" onerror="this.src='https://via.placeholder.com/260x180/eee/999?text=No+Photo'">
                                             </div>
                                             <div class="sold-property-main">
-                                                <div class="sold-property-type" style="font-size: 0.75rem; margin-bottom: 2px;">
+                                                <div class="sold-property-type">
                                                     ${sold.property_type || 'Property'} (${sold.tenure || 'Unknown'})
                                                 </div>
-                                                <div style="font-size: 0.8rem; font-weight: 600; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${soldHouse ? soldHouse + ', ' : ''}${soldRoad}">
+                                                <div class="sold-property-location" title="${soldHouse ? soldHouse + ', ' : ''}${soldRoad}">
                                                     ${soldHouse ? soldHouse + ', ' : ''}${soldRoad}
                                                 </div>
                                                 
-                                                <!-- Prices below -->
-                                                <div class="sold-prices-section">
+                                                <div class="sold-property-transactions">
                                                     ${sold.prices && sold.prices.length > 0 ? 
                                                         sold.prices.slice(0, 3).map(price => `
-                                                            <div class="sold-history-row">
-                                                                <span>${price.sold_date || '-'}</span>
-                                                                <span class="sold-history-price">${price.sold_price || '-'}</span>
+                                                            <div class="sold-tx-row">
+                                                                <span class="sold-tx-date">${price.sold_date || '-'}</span>
+                                                                <span class="sold-tx-price">${price.sold_price || '-'}</span>
                                                             </div>
-                                                        `).join('') + (sold.prices.length > 3 ? `<div style="font-size:0.6rem; text-align:center; color:var(--text-secondary); margin-top:2px;">+ ${sold.prices.length - 3} more</div>` : '')
-                                                    : `<div style="font-size:0.7rem; color:var(--text-secondary);">No price data</div>`}
+                                                        `).join('')
+                                                    : `<div style="font-size:0.8rem; color:var(--text-secondary);">No price data</div>`}
                                                 </div>
                                             </div>
                                         </div>

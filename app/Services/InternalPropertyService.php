@@ -676,7 +676,9 @@ class InternalPropertyService
                              'bedrooms' => $result['bedrooms'] ?? null,
                              'bathrooms' => $result['bathrooms'] ?? null,
                              'tenure' => $tenure,
-                             'detail_url' => $detailUrl,
+                            'image_url' => $result['imageInfo']['mediumImageUrl'] ?? $result['imageInfo']['imageUrl'] ?? null,
+                            'map_url' => $result['staticMapUrls']['staticMapImgUrlDesktop'] ?? null,
+                            'detail_url' => $detailUrl,
                              'transactions' => []
                          ];
 

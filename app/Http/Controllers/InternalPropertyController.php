@@ -121,6 +121,7 @@ class InternalPropertyController extends Controller
                 'source' => 'database'
             ]);
             
+            
         } catch (\Exception $e) {
             Log::error("loadPropertiesFromDatabase error: " . $e->getMessage());
             
@@ -220,6 +221,7 @@ class InternalPropertyController extends Controller
                         'house_number' => $sold->house_number,
                         'road_name' => $sold->road_name,
                         'image_url' => $sold->image_url,
+                        'map_url' => $sold->map_url,
                         'property_type' => $sold->property_type,
                         'bedrooms' => $sold->bedrooms,
                         'bathrooms' => $sold->bathrooms,
@@ -513,7 +515,14 @@ class InternalPropertyController extends Controller
                             \App\Models\Property::truncate();
                             Log::info("Truncated properties table");
                             
-                            Log::info("Successfully truncated all data tables");
+                            // Reset ALL auto-increment counters to 1 for a truly fresh start
+                            \DB::statement('ALTER TABLE properties_sold_prices AUTO_INCREMENT = 1');
+                            \DB::statement('ALTER TABLE properties_sold AUTO_INCREMENT = 1');
+                            \DB::statement('ALTER TABLE property_images AUTO_INCREMENT = 1');
+                            \DB::statement('ALTER TABLE urls AUTO_INCREMENT = 1');
+                            \DB::statement('ALTER TABLE properties AUTO_INCREMENT = 1');
+                            
+                            Log::info("Successfully truncated all data tables and reset auto-increment counters to 1");
                         } catch (\Exception $truncateEx) {
                             Log::error("Error during truncation: " . $truncateEx->getMessage());
                             
@@ -529,12 +538,14 @@ class InternalPropertyController extends Controller
                         // Re-enable foreign key checks
                         \DB::statement('SET FOREIGN_KEY_CHECKS=1;');
                         
-                        // Reset auto-increment counters to 1
+                        // Reset all auto-increment counters to 1 (Moved inside try-catch and ensured all tables included)
+                        // This block is redundant now as it's handled above, but keeping for safety if truncation fallback happened
                         \DB::statement('ALTER TABLE properties_sold_prices AUTO_INCREMENT = 1');
                         \DB::statement('ALTER TABLE properties_sold AUTO_INCREMENT = 1');
                         \DB::statement('ALTER TABLE property_images AUTO_INCREMENT = 1');
                         \DB::statement('ALTER TABLE urls AUTO_INCREMENT = 1');
-                        Log::info("Reset all auto-increment counters to 1");
+                        \DB::statement('ALTER TABLE properties AUTO_INCREMENT = 1');
+                        Log::info("Reset all auto-increment counters to 1 (via safety fallback)");
                     }
                     
                     Log::info("Old data cleared successfully. Saving new data.");
@@ -729,6 +740,8 @@ class InternalPropertyController extends Controller
                                                         'bedrooms' => $soldProp['bedrooms'],
                                                         'bathrooms' => $soldProp['bathrooms'],
                                                         'tenure' => $soldProp['tenure'],
+                                                        'image_url' => $soldProp['image_url'] ?? null,
+                                                        'map_url' => $soldProp['map_url'] ?? null,
                                                         'detail_url' => $soldProp['detail_url'] ?? null
                                                     ]
                                                 );
