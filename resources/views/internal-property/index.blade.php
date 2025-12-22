@@ -2300,10 +2300,22 @@
                     sorted.sort((a, b) => (parseFloat(b.average_sold_price) || 0) - (parseFloat(a.average_sold_price) || 0));
                     break;
                 case 'discount_high':
-                    sorted.sort((a, b) => (parseFloat(b.discount_metric) || 0) - (parseFloat(a.discount_metric) || 0));
+                    // Sort by discount descending (Largest first)
+                    // Treat null/missing as -Infinity so they go to the bottom
+                    sorted.sort((a, b) => {
+                        const valA = a.discount_metric !== null && a.discount_metric !== undefined ? parseFloat(a.discount_metric) : -999999;
+                        const valB = b.discount_metric !== null && b.discount_metric !== undefined ? parseFloat(b.discount_metric) : -999999;
+                        return valB - valA;
+                    });
                     break;
                 case 'discount_low':
-                    sorted.sort((a, b) => (parseFloat(a.discount_metric) || 0) - (parseFloat(b.discount_metric) || 0));
+                    // Sort by discount ascending (Smallest first)
+                    // Treat null/missing as Infinity so they go to the bottom
+                    sorted.sort((a, b) => {
+                        const valA = a.discount_metric !== null && a.discount_metric !== undefined ? parseFloat(a.discount_metric) : 999999;
+                        const valB = b.discount_metric !== null && b.discount_metric !== undefined ? parseFloat(b.discount_metric) : 999999;
+                        return valA - valB;
+                    });
                     break;
                 case 'road_asc':
                     sorted.sort((a, b) => {
@@ -2368,9 +2380,9 @@
                         </div>
                         
                         <div class="property-info-section">
-                            ${property.discount_metric && property.discount_metric > 0 ? `
-                                <div class="discount-badge">
-                                    ${property.discount_metric}% Discount
+                            ${property.discount_metric !== null && property.discount_metric !== undefined ? `
+                                <div class="discount-badge" style="${property.discount_metric < 0 ? 'background: var(--error);' : ''}">
+                                    ${Math.abs(property.discount_metric)}% ${property.discount_metric < 0 ? 'Premium' : 'Discount'}
                                 </div>
                             ` : ''}
                             
