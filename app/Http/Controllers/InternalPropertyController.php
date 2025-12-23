@@ -22,26 +22,42 @@ class InternalPropertyController extends Controller
         $this->scraperService = $scraperService;
     }
 
+    /**
+     * Display the internal properties listing view
+     * 
+     * @return \Illuminate\View\View
+     */
     public function index()
     {
         return view('internal-property.index', ['search' => null]);
     }
 
+    /**
+     * Display internal properties for a specific saved search
+     */
     public function show($id)
     {
         $search = SavedSearch::findOrFail($id);
         return view('internal-property.index', ['search' => $search]);
     }
 
+    /**
+     * Load full property data from database (used on page refresh)
+     * This avoids re-scraping from the source website
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
     public function loadPropertiesFromDatabase(Request $request)
     {
         try {
             $searchId = $request->input('search_id');
             $page = $request->input('page', 1);
-            $perPage = $request->input('per_page', 50);
+            $perPage = $request->input('per_page', 50); // Reduced to 50 to prevent timeout with sold data
             
             Log::info("loadPropertiesFromDatabase: Loading properties for search_id: " . ($searchId ?? 'all') . ", page: {$page}, per_page: {$perPage}");
             
+            // Build query for properties
             $query = \App\Models\Property::query();
             
             if ($searchId) {
@@ -51,6 +67,7 @@ class InternalPropertyController extends Controller
                 Log::info("loadPropertiesFromDatabase: No filter, loading all properties");
             }
             
+            // Get total count before pagination
             $totalCount = $query->count();
             Log::info("loadPropertiesFromDatabase: Total {$totalCount} properties in database");
             
@@ -70,11 +87,14 @@ class InternalPropertyController extends Controller
                 ]);
             }
             
+            // Apply pagination and load with relationships
+            // Note: Loading sold properties can be heavy, so using smaller page size
             $properties = $query->with(['images', 'soldProperties.prices'])
                 ->skip(($page - 1) * $perPage)
                 ->take($perPage)
                 ->get();
             
+            // Debug: Log sold properties for first property
             if ($properties->count() > 0) {
                 $firstProp = $properties->first();
                 Log::info("loadPropertiesFromDatabase: First property ID={$firstProp->id}, Images={$firstProp->images->count()}, Sold={$firstProp->soldProperties->count()}");
@@ -82,6 +102,7 @@ class InternalPropertyController extends Controller
             
             Log::info("loadPropertiesFromDatabase: Loaded {$properties->count()} properties (page {$page})");
             
+            // Format properties using shared formatting method
             $formattedProperties = $this->formatPropertiesForResponse($properties);
             
             $totalPages = ceil($totalCount / $perPage);
@@ -112,23 +133,44 @@ class InternalPropertyController extends Controller
         }
     }
 
+    /**
+     * Format properties collection for JSON response
+     * Ensures consistent data structure between loading from DB and after scraping
+     * 
+     * @param \Illuminate\Database\Eloquent\Collection $properties Properties with images and soldProperties.prices loaded
+     * @return array Formatted properties array
+     */
+    /**
+     * Format properties for response, ensuring original URLs are preserved
+     * 
+     * @param \Illuminate\Support\Collection $properties
+     * @param array $urlMap Mapping of property_id to original URL
+     * @return array
+     */
     private function formatPropertiesForResponse($properties, $urlMap = [])
     {
         return $properties->map(function($prop) use ($urlMap) {
+            // Use the original URL if available in the map, otherwise build one
             $url = $urlMap[$prop->id] ?? "https://www.rightmove.co.uk/properties/{$prop->id}";
             
+            // Get images
             $images = $prop->images ? $prop->images->pluck('image_link')->toArray() : [];
             
+            // Parse key_features if stored as JSON
             $keyFeatures = [];
             if ($prop->key_features) {
+                // key_features is already cast to array by Laravel model, no need to json_decode
                 if (is_array($prop->key_features)) {
                     $keyFeatures = $prop->key_features;
                 } elseif (is_string($prop->key_features)) {
+                    // Only decode if it's still a string
                     $decoded = json_decode($prop->key_features, true);
                     $keyFeatures = is_array($decoded) ? $decoded : [$prop->key_features];
                 }
             }
             
+            // Format sold properties with their prices for JavaScript consumption
+            // Also deduplicate by location to prevent same property showing multiple times
             $soldProperties = [];
             $totalSalesInPeriod = 0;
             $salesCountInPeriod = 0;
@@ -138,18 +180,18 @@ class InternalPropertyController extends Controller
             if ($prop->soldProperties && $prop->soldProperties->count() > 0) {
                 Log::info("Property {$prop->id} has {$prop->soldProperties->count()} sold properties via relationship");
                 
-
-                
+                // Group by location to find the unique properties
                 $uniqueLatestSalesInPeriod = [];
                 
                 $soldProperties = $prop->soldProperties
-                    ->unique('location')
+                    ->unique('location')  // Deduplicate by location for the list
                     ->values()
                     ->map(function($sold) use (&$uniqueLatestSalesInPeriod) {
                     $latestSaleInPeriod = null;
                     $latestTimestamp = 0;
                     
                     $prices = $sold->prices ? $sold->prices->map(function($price) use (&$latestSaleInPeriod, &$latestTimestamp) {
+                        // Parse date for period check (Jan 2020 - Dec 2025)
                         $timestamp = strtotime($price->sold_date);
                         if ($timestamp) {
                             $year = (int)date('Y', $timestamp);
@@ -193,6 +235,7 @@ class InternalPropertyController extends Controller
                     $avgSoldPrice = round(array_sum($uniqueLatestSalesInPeriod) / count($uniqueLatestSalesInPeriod));
                     $salesCountInPeriod = count($uniqueLatestSalesInPeriod);
                     
+                    // Parse advertised price
                     $advertisedPriceStr = $prop->price ?? '';
                     $advertisedPrice = floatval(preg_replace('/[^\d.]/', '', $advertisedPriceStr));
                     
@@ -201,9 +244,11 @@ class InternalPropertyController extends Controller
                     }
                 }
             } else {
+                // Debug: Log why no sold properties are found
                 Log::info("Property {$prop->id} has no sold properties. sold_link: " . ($prop->sold_link ?? 'NULL'));
             }
             
+            // Extract house number and road name
             $address = $prop->location ?? 'Unknown location';
             $houseNumber = '';
             $roadName = $address;
@@ -239,20 +284,30 @@ class InternalPropertyController extends Controller
                 'sales_count_in_period' => $salesCountInPeriod,
                 'discount_metric' => $discountMetric !== null ? round($discountMetric, 1) : null,
                 'images' => $images,
-                'loading' => false,
+                'loading' => false, // Data is fully loaded from DB
                 'from_database' => true
             ];
         })->toArray();
     }
 
+    /**
+     * Fetch URLs with pagination support for progressive loading
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
     public function fetchUrlsPaginated(Request $request)
     {
         try {
             $page = $request->input('page', 1);
             $perPage = $request->input('per_page', 100);
             
-
+            // Cache check removed
+            if (false) { // Disabled cache block
+                // Original cache logic removed
+            }
             
+            // If no cache and page 1, trigger URL fetch
             if ($page === 1) {
                 Log::info("Cache miss - triggering URL fetch");
                 
@@ -261,6 +316,9 @@ class InternalPropertyController extends Controller
                 $data = $response->getData(true);
                 
                 if ($data['success'] && isset($data['urls']) && count($data['urls']) > 0) {
+                    // Cache removed
+                    // \Cache::put($cacheKey, $data, 1800);
+                    
                     $allUrls = $data['urls'];
                     $total = count($allUrls);
                     $urlsPage = array_slice($allUrls, 0, $perPage);
@@ -281,6 +339,7 @@ class InternalPropertyController extends Controller
                 }
             }
             
+            // No cache and not page 1
             return response()->json([
                 'success' => false,
                 'message' => 'URLs not cached. Please fetch page 1 first.',
@@ -305,20 +364,27 @@ class InternalPropertyController extends Controller
         }
     }
     
+    /**
+     * Fetch URLs (optimized)
+     * Uses caching to avoid long-running scraping on every request
+     * 
+     * @return \Illuminate\Http\JsonResponse
+     */
     public function fetchUrls(Request $request)
     {
         try {
             $searchId = $request->input('search_id');
             $import = $request->input('import') === 'true' || $request->input('import') === true;
             
-
-            
+            // IF NOT IMPORT: Check DB first
             if (!$import) {
                 Log::info("fetchUrls: Checking DB for search_id: " . ($searchId ?? 'null'));
                 
+                // Check Database
                 $query = Url::query();
                 if ($searchId) {
                     $search = SavedSearch::find($searchId);
+                    // Filter by filter_id matches search_id
                    $query->where('filter_id', $searchId);
                 }
                 
@@ -328,6 +394,7 @@ class InternalPropertyController extends Controller
                 if ($dbUrls->count() > 0) {
                      Log::info("Returning " . $dbUrls->count() . " URLs from DATABASE");
                      
+                     // Format to match Scraper response
                      $formattedUrls = $dbUrls->map(function($url) {
                         return [
                             'url' => $url->url,
@@ -346,6 +413,7 @@ class InternalPropertyController extends Controller
                 }
             }
             
+            // If explicit import OR no data found, proceed to fetch
             if (!$import) {
                  return response()->json([
                     'success' => true, // Success but empty
@@ -358,7 +426,8 @@ class InternalPropertyController extends Controller
 
             Log::info("Fetching fresh URLs (Import: Yes)");
             
-            set_time_limit(600);
+            // FETCH URLS FIRST (Before wiping DB)
+            set_time_limit(600); // 10 minutes
             
             $response = null;
             if ($searchId) {
@@ -373,12 +442,16 @@ class InternalPropertyController extends Controller
                 $response = $this->syncUrls();
             }
             
+            // Get the JSON data from the response
             $data = $response->getData(true);
             
             // ONLY DELETE OLD DATA IF WE ACTUALLY FOUND NEW DATA
             if ($data['success'] && isset($data['urls']) && count($data['urls']) > 0) {
                 Log::info("Found " . count($data['urls']) . " new URLs. Clearing old data...");
 
+                // CLEAR OLD DATA (never touch saved_searches table)
+                // If importing for a specific search, delete only that search's data
+                // If global import, delete all data
                 try {
                         // GLOBAL DELETE: Remove all data (but NOT saved_searches)
                         // The user wants old records replaced entirely and IDs starting from 1
@@ -829,7 +902,7 @@ class InternalPropertyController extends Controller
     public function processSoldLinks(Request $request)
     {
         try {
-            set_time_limit(600);
+            set_time_limit(600); // 10 minutes
             
             $limit = $request->input('limit', null);
             
@@ -865,6 +938,7 @@ class InternalPropertyController extends Controller
                 try {
                     Log::info("Processing sold link for property {$property->id}: {$property->sold_link}");
                     
+                    // Scrape sold properties from the sold link
                     $soldData = $this->propertyService->scrapeSoldProperties($property->sold_link, $property->id);
                     
                     if (empty($soldData)) {
@@ -881,6 +955,8 @@ class InternalPropertyController extends Controller
                                 continue;
                             }
                             
+                            // Save to properties_sold
+                            // Link to parent property via property_id, use location for uniqueness
                             $soldRecord = PropertySold::updateOrCreate(
                                 [
                                     'property_id' => $property->id,
@@ -926,7 +1002,8 @@ class InternalPropertyController extends Controller
                     
                     $processedCount++;
                     
-                    usleep(300000);
+                    // Small delay to be respectful to the server
+                    usleep(300000); // 0.3 second
                     
                 } catch (\Exception $e) {
                     Log::error("Error processing sold link for property {$property->id}: " . $e->getMessage());
@@ -957,6 +1034,10 @@ class InternalPropertyController extends Controller
         }
     }
 
+    /**
+     * Sync/fetch property URLs from Rightmove (merged from PropertyController)
+     * Uses default Bath URL for testing
+     */
     public function syncUrls(Request $request = null)
     {
         set_time_limit(300); // 5 minutes
@@ -970,6 +1051,13 @@ class InternalPropertyController extends Controller
         return $this->scrapePropertyUrls($baseUrl);
     }
 
+    /**
+     * Scrape property URLs from Rightmove search results page (merged from PropertyController)
+     * 
+     * @param string $baseUrl The Rightmove search URL
+     * @param bool $fetchAll Whether to fetch all pages or just the first one
+     * @return \Illuminate\Http\JsonResponse
+     */
     public function scrapePropertyUrls($baseUrl, $fetchAll = true) 
     {
         try {
@@ -1047,6 +1135,7 @@ class InternalPropertyController extends Controller
                                 Log::info("Page " . ($page + 1) . " processed. Found " . $pagePropertiesCount . " properties. Total so far: " . count($allUrls));
                             }
                         } else {
+                            // Fallback method
                             $scripts = $crawler->filter('script')->each(function (\Symfony\Component\DomCrawler\Crawler $node) {
                                 return $node->html();
                             });
@@ -1108,6 +1197,7 @@ class InternalPropertyController extends Controller
                     }
                 }
                 
+                // CORRECTLY BREAK OUTER LOOP if too many empty pages
                 if ($consecutiveEmptyPages >= $maxConsecutiveEmptyPages) {
                     Log::info("Stopping pagination loop due to consecutive empty pages.");
                     break;
@@ -1139,6 +1229,7 @@ class InternalPropertyController extends Controller
                 ], 200);
             }
             
+            // Remove duplicates based on ID
             $uniqueUrls = [];
             $seenIds = [];
             foreach ($allUrls as $urlData) {

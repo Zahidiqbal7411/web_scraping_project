@@ -112,20 +112,43 @@
             justify-content: space-between;
             align-items: center;
             box-shadow: var(--shadow-sm);
-            flex-wrap: wrap;
+            flex-wrap: nowrap; /* Changed from wrap to nowrap */
             gap: 1.5rem;
+            overflow-x: auto; /* Enable horizontal scrolling */
+            overflow-y: hidden;
+        }
+        
+        /* Scrollbar styling for stats bar */
+        .stats-bar::-webkit-scrollbar {
+            height: 6px;
+        }
+        
+        .stats-bar::-webkit-scrollbar-track {
+            background: var(--bg);
+            border-radius: 3px;
+        }
+        
+        .stats-bar::-webkit-scrollbar-thumb {
+            background: var(--card-border);
+            border-radius: 3px;
+        }
+        
+        .stats-bar::-webkit-scrollbar-thumb:hover {
+            background: var(--text-secondary);
         }
 
         .stat-items-group {
             display: flex;
             gap: 2rem;
             align-items: center;
+            flex-shrink: 0; /* Prevent shrinking when scrolling */
         }
 
         .sort-group {
             display: flex;
             align-items: center;
             gap: 0.75rem;
+            flex-shrink: 0; /* Prevent shrinking when scrolling */
         }
 
         .sort-select {
@@ -361,29 +384,32 @@
             font-weight: 600;
         }
 
-        /* Average Sold Price Display */
+        /* Average Sold Price Display - ENHANCED TYPOGRAPHY */
         .avg-sold-price {
             display: flex;
             align-items: center;
             gap: 0.5rem;
-            padding: 0.5rem 0;
-            margin-top: 0.25rem;
-            font-size: 0.85rem;
+            padding: 0.75rem 0; /* Increased padding */
+            margin-top: 0.5rem; /* Increased margin */
+            font-size: 1.1rem; /* Increased from 0.85rem */
+            flex-wrap: wrap;
         }
 
         .avg-sold-price .avg-label {
             color: var(--text-secondary);
-            font-weight: 500;
+            font-weight: 600; /* Increased from 500 */
         }
 
         .avg-sold-price .avg-value {
-            font-weight: 700;
-            color: var(--success);
+            font-weight: 800; /* Increased from 700 */
+            font-size: 1.35rem; /* Increased for prominence */
+            color: var(--success); /* Keep green color */
         }
 
         .avg-sold-price .avg-count {
             color: var(--text-secondary);
-            font-size: 0.75rem;
+            font-size: 0.9rem; /* Increased from 0.75rem */
+            font-weight: 500;
         }
 
         /* Sold Sidebar Styles */
@@ -494,7 +520,7 @@
             font-size: 0.85rem; /* Smaller default for 2-column view */
             font-weight: 600;
             color: var(--text-primary);
-            margin-bottom: 0.25rem;
+            margin-bottom: 0.5rem; /* Increased margin */
             line-height: 1.3;
             display: -webkit-box;
             -webkit-line-clamp: 2;
@@ -506,6 +532,50 @@
             font-size: 1.15rem; /* Much larger and more prominent */
             margin-bottom: 1rem;
             font-weight: 700;
+        }
+        
+        /* Sold Property Features (Bedrooms/Bathrooms) */
+        .sold-property-features {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 0.5rem;
+            flex-wrap: wrap;
+        }
+        
+        .sold-feature-item {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+        
+        .sidebar-collapsed .sold-feature-item {
+            font-size: 0.95rem;
+            gap: 0.4rem;
+        }
+        
+        .sold-feature-item svg {
+            flex-shrink: 0;
+            color: var(--primary);
+        }
+        
+        .sold-tenure-badge {
+            font-size: 0.7rem;
+            padding: 0.2rem 0.5rem;
+            background: var(--primary-light);
+            color: var(--primary);
+            border-radius: 4px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        
+        .sidebar-collapsed .sold-tenure-badge {
+            font-size: 0.8rem;
+            padding: 0.3rem 0.6rem;
         }
         
         .sidebar-collapsed .sold-property-type {
@@ -1629,7 +1699,7 @@
         let propertyUrls = [];
         let loadedProperties = [];
         let currentPage = 1;
-        const itemsPerPage = 10; // Show 10 properties per page
+        const itemsPerPage = 100; // Increased from 10 to show more properties per page and reduce pagination issues
         
         // Image slider state
         let currentImageIndexes = {};
@@ -1659,13 +1729,15 @@
         // Search context from server
         window.searchContext = {!! json_encode($search ?? null) !!};
 
-        // Import button handler
-        syncBtn.addEventListener('click', async () => {
-            await importAllProperties(true);
-        });
+
 
         // Load properties on startup
         document.addEventListener('DOMContentLoaded', async () => {
+            // Attach import button handler after DOM is loaded
+            syncBtn.addEventListener('click', async () => {
+                await importAllProperties(true);
+            });
+            
             // On page load, try to load complete property data from database
             await loadFromDatabaseOnStartup();
         });
@@ -2286,7 +2358,7 @@
         function sortProperties(type) {
             let sorted = [...loadedProperties];
             
-            switch(type) {
+           switch(type) {
                 case 'price_low':
                     sorted.sort((a, b) => parseNumericPrice(a.price) - parseNumericPrice(b.price));
                     break;
@@ -2329,8 +2401,10 @@
                     break;
             }
             
+            // CRITICAL FIX: Update loadedProperties globally to persist sorting
+            loadedProperties = sorted;
             currentPage = 1;
-            displayProperties(sorted);
+            displayProperties(loadedProperties);
         }
 
         function parseNumericPrice(priceStr) {
@@ -2505,6 +2579,8 @@
                                     const soldPhoto = sold.image_url || sold.map_url || 'https://via.placeholder.com/80x60/eee/999?text=No+Photo';
                                     const soldHouse = sold.house_number || '';
                                     const soldRoad = sold.road_name || sold.location || '';
+                                    const bedrooms = sold.bedrooms || '-';
+                                    const bathrooms = sold.bathrooms || '-';
                                     
                                     return `
                                     <a href="${soldLink}" target="_blank" class="sold-item-card-link" onclick="event.stopPropagation()">
@@ -2514,10 +2590,27 @@
                                             </div>
                                             <div class="sold-property-main">
                                                 <div class="sold-property-type">
-                                                    ${sold.property_type || 'Property'} (${sold.tenure || 'Unknown'})
+                                                    ${sold.property_type || 'Property'}
                                                 </div>
                                                 <div class="sold-property-location" title="${soldHouse ? soldHouse + ', ' : ''}${soldRoad}">
-                                                    ${soldHouse ? soldHouse + ', ' : ''}${soldRoad}
+                                                    ${soldHouse ? `<span style="color: var(--primary); font-weight: 700;">${soldHouse},</span> ` : ''}${soldRoad}
+                                                </div>
+                                                
+                                                <!-- Bedrooms and Bathrooms -->
+                                                <div class="sold-property-features">
+                                                    <div class="sold-feature-item">
+                                                        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
+                                                        </svg>
+                                                        <span>${bedrooms}</span>
+                                                    </div>
+                                                    <div class="sold-feature-item">
+                                                        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z"></path>
+                                                        </svg>
+                                                        <span>${bathrooms}</span>
+                                                    </div>
+                                                    ${sold.tenure ? `<div class="sold-feature-item"><span class="sold-tenure-badge">${sold.tenure}</span></div>` : ''}
                                                 </div>
                                                 
                                                 <div class="sold-property-transactions">
