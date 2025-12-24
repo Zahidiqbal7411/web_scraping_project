@@ -11,9 +11,7 @@ class Property extends Model
 
     protected $primaryKey = 'id';
     public $incrementing = false;
-    protected $keyType = 'string'; // Usually BigInt is string in PHP if > int max, but string is safe for direct IDs. Though 'unsignedBigInteger' fits in PHP int on 64bit. Safe to set keyType = int?
-    // User asked for unsignedBigInt 20. standard PHP int is 64 bit.
-    // Rightmove IDs are like 165671282 (9 digits). PHP int handles it fine.
+    protected $keyType = 'integer'; // Rightmove IDs are like 165671282 (9 digits). PHP int handles it fine.
 
     protected $fillable = [
         'id',

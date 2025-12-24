@@ -13,17 +13,22 @@ class PropertySold extends Model
 
     protected $fillable = [
         'property_id',
-        'source_sold_link',
-        'detail_url',
         'location',
+        'source_sold_link',
         'house_number',
         'road_name',
         'image_url',
-        'map_url',
+        'images', // Add to fillable
         'property_type',
         'bedrooms',
         'bathrooms',
-        'tenure'
+        'tenure',
+        'detail_url',
+        'map_url'
+    ];
+    
+    protected $casts = [
+        'images' => 'array', // Cast to array
     ];
 
     public function prices()

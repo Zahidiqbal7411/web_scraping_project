@@ -31,12 +31,23 @@
             color: var(--text-primary);
             min-height: 100vh;
             line-height: 1.6;
+            width: 100%;
+            /* Removed overflow-x: hidden to allow scrolling as requested */
         }
 
         .container {
             max-width: 1400px;
             margin: 0 auto;
             padding: 2rem 1.5rem;
+            width: 100%;
+            box-sizing: border-box;
+            /* Removed overflow-x: hidden */
+        }
+        
+        /* Force all text to wrap */
+        * {
+            word-wrap: break-word;
+            overflow-wrap: break-word;
         }
 
         /* Header */
@@ -402,7 +413,7 @@
 
         .avg-sold-price .avg-value {
             font-weight: 800; /* Increased from 700 */
-            font-size: 1.35rem; /* Increased for prominence */
+            font-size: 1.6rem; /* Increased for prominence */
             color: var(--success); /* Keep green color */
         }
 
@@ -450,206 +461,324 @@
             flex: 1;
             display: flex;
             flex-direction: column;
-            gap: 1rem;
+            gap: 1.25rem; /* Increased gap for better separation */
             max-height: 600px;
+            /* Custom scrollbar for better look */
+            scrollbar-width: thin;
+            scrollbar-color: var(--card-border) transparent;
+        }
+
+        .sold-list-container::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .sold-list-container::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .sold-list-container::-webkit-scrollbar-thumb {
+            background-color: var(--card-border);
+            border-radius: 20px;
         }
         
-        /* Sold Card Style for Sidebar */
-        .sold-item-card {
+        /* NEW Sold Row Style - Vertical Card View */
+        .sold-item-row {
+            display: flex;
+            flex-direction: column; /* Stack vertically */
             background: white;
             border: 1px solid var(--card-border);
-            border-radius: 10px;
-            padding: 0.6rem;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.03);
-            display: flex;
-            gap: 0.75rem;
-            transition: all 0.2s ease;
-        }
-
-        /* Default (Expanded Sidebar / 2-column grid) Photo Size */
-        .sold-property-photo {
-            flex: 0 0 90px;
-            width: 90px;
-            height: 65px;
-            border-radius: 6px;
+            border-radius: 8px;
             overflow: hidden;
+            margin-bottom: 0.75rem;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .sold-item-row:hover {
+            border-color: var(--primary);
+            box-shadow: var(--shadow-small);
+            transform: translateY(-1px);
+        }
+
+        /* 1. Image Column (Top) */
+        .sold-image-col {
+            width: 100%;
+            height: 200px !important; /* Force Fixed Height - IMPORTANT to override any browser quirk */
+            min-height: 200px; /* Duplicate constraint */
+            flex-shrink: 0;
+            flex-shrink: 0;
+            position: relative;
             background: #f0f0f0;
-            border: 1px solid var(--card-border);
-            transition: all 0.3s ease;
+            border-bottom: 1px solid var(--card-border);
         }
 
-        /* BIG Photo when Sidebar is Collapsed - High Definition Size */
-        .sidebar-collapsed .sold-property-photo {
-            flex: 0 0 260px;
-            width: 260px;
-            height: 180px;
-            border-radius: 10px;
+        .sold-image-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+            background: #e0e0e0;
         }
 
-        /* BIG Card Padding when Sidebar is Collapsed */
-        .sidebar-collapsed .sold-item-card {
-            padding: 1.5rem;
-            gap: 2rem;
-            border-radius: 14px;
+        .sold-image-slides {
+            width: 100%;
+            height: 100%;
+            position: relative;
         }
 
-        .sold-property-photo img {
+        .sold-row-slide {
+            position: absolute; /* Force Overlap */
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .sold-row-slide.active {
+            opacity: 1;
+            z-index: 2;
+            pointer-events: auto;
+        }
+
+        .sold-row-slide img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        /* Mini Nav Arrows */
+        .sold-thumb-nav {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            border: none;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.2s;
+            z-index: 5;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+
+        .sold-image-col:hover .sold-thumb-nav {
+            opacity: 1;
+        }
+
+        .sold-thumb-nav.left { left: 8px; }
+        .sold-thumb-nav.right { right: 8px; }
+
+        .sold-photo-count {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        /* Content Wrapper for Details and History */
+        .sold-content-wrapper {
+            display: flex;
+            flex-direction: column;
+            padding: 0.75rem;
+            gap: 0.75rem;
+        }
+
+        /* 2. Details Column (Top Part of Content) */
+        .sold-details-col {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+
+        .sold-row-type {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .sold-row-address {
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 0.95rem;
+            line-height: 1.3;
+        }
+
+        .sold-row-specs {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-top: 0.25rem;
+        }
+        
+        .sold-spec {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+        
+        /* 3. History Column (Bottom Part of Content) */
+        .sold-history-col {
+            width: 100%;
+            padding-top: 0.75rem;
+            border-top: 1px solid var(--card-border);
+        }
+
+        .sold-history-table {
+            width: 100%;
+            font-size: 0.8rem;
+        }
+
+        .sold-history-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.25rem;
+        }
+
+        .sold-history-date {
+            color: var(--text-secondary);
+        }
+
+        .sold-history-price {
+            color: var(--text-primary);
+            font-weight: 700;
+            text-align: right;
+        }
+        
+        /* Sold Card Carousel Styles */
+        .sold-card-slides {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .sold-slide {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        
+        .sold-slide.active {
+            opacity: 1;
+            position: relative;
+        }
+        
+        .sold-slide img {
             width: 100%;
             height: 100%;
             object-fit: cover;
         }
-
-        .sold-property-main {
-            flex: 1;
-            min-width: 0;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-        }
         
-        .sold-property-type {
-            font-weight: 700;
-            font-size: 0.75rem;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 0.25rem;
-        }
-
-        .sold-property-location {
-            font-size: 0.85rem; /* Smaller default for 2-column view */
-            font-weight: 600;
-            color: var(--text-primary);
-            margin-bottom: 0.5rem; /* Increased margin */
-            line-height: 1.3;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-        }
-
-        .sidebar-collapsed .sold-property-location {
-            font-size: 1.15rem; /* Much larger and more prominent */
-            margin-bottom: 1rem;
-            font-weight: 700;
-        }
-        
-        /* Sold Property Features (Bedrooms/Bathrooms) */
-        .sold-property-features {
+        .sold-nav-arrow {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(255, 255, 255, 0.9);
+            border: none;
+            color: #333;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
             display: flex;
             align-items: center;
-            gap: 1rem;
-            margin-bottom: 0.5rem;
-            flex-wrap: wrap;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            opacity: 0;
+            transition: opacity 0.2s, background 0.2s;
+            z-index: 10;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
         }
         
-        .sold-feature-item {
-            display: flex;
-            align-items: center;
-            gap: 0.3rem;
-            font-size: 0.8rem;
-            color: var(--text-secondary);
-            font-weight: 500;
+        .sold-item-card:hover .sold-nav-arrow {
+            opacity: 1;
         }
         
-        .sidebar-collapsed .sold-feature-item {
-            font-size: 0.95rem;
-            gap: 0.4rem;
+        .sold-nav-arrow:hover {
+            background: white;
         }
         
-        .sold-feature-item svg {
-            flex-shrink: 0;
-            color: var(--primary);
+        .sold-nav-arrow.left {
+            left: 6px;
         }
         
-        .sold-tenure-badge {
+        .sold-nav-arrow.right {
+            right: 6px;
+        }
+        
+        .sold-card-counter {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
             font-size: 0.7rem;
-            padding: 0.2rem 0.5rem;
-            background: var(--primary-light);
-            color: var(--primary);
-            border-radius: 4px;
             font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.3px;
+            z-index: 5;
         }
         
-        .sidebar-collapsed .sold-tenure-badge {
-            font-size: 0.8rem;
-            padding: 0.3rem 0.6rem;
+        /* BIG Card when Sidebar is Collapsed */
+        .sidebar-collapsed .sold-card-image-container {
+            height: 200px;
         }
         
-        .sidebar-collapsed .sold-property-type {
-            font-size: 0.95rem;
-            margin-bottom: 0.75rem;
-            color: var(--primary);
+        .sidebar-collapsed .sold-card-price {
+            font-size: 1.4rem;
         }
         
-        .sold-property-transactions {
-            display: flex;
-            flex-direction: column;
-            gap: 0.25rem;
-        }
-
-        .sold-tx-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 0.8rem; /* Smaller default */
-        }
-
-        .sidebar-collapsed .sold-tx-row {
-            font-size: 0.95rem; /* Larger when sidebar collapsed */
-            padding: 0.25rem 0;
-        }
-
-        .sold-tx-date {
-            color: var(--text-secondary);
-        }
-
-        .sold-tx-price {
-            font-weight: 700;
-            color: var(--primary);
-        }
-
-        /* Sold Sidebar Footer */
-        .sold-sidebar-footer {
+        .sidebar-collapsed .sold-card-content {
             padding: 1rem;
-            border-top: 1px solid var(--card-border);
-            background: #f8f9fa;
         }
-
-        /* Clickable Sold Card Link */
-        .sold-item-card-link {
-            text-decoration: none;
-            color: inherit;
-            display: block;
+        
+        .sidebar-collapsed .sold-spec {
+            font-size: 1rem;
         }
-
-        .sold-item-card-link:hover .sold-item-card {
-            background: var(--card-bg);
-            border-color: var(--secondary);
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            transform: translateY(-1px);
+        
+        .sidebar-collapsed .sold-card-address {
+            font-size: 0.9rem;
         }
-
-        .sold-item-card-link:hover .sold-link-hint {
-            color: var(--secondary);
+        
+        .sidebar-collapsed .sold-card-history {
+            font-size: 0.85rem;
         }
-
-        /* Link Hint at bottom of sold card */
-        .sold-link-hint {
-            display: flex;
-            align-items: center;
-            justify-content: flex-end;
-            gap: 0.3rem;
-            margin-top: 0.5rem;
-            font-size: 0.65rem;
+        
+        /* No sold data message */
+        .no-sold-data {
+            padding: 2rem 1rem;
+            text-align: center;
             color: var(--text-secondary);
-            transition: color 0.2s ease;
-        }
-
-        .sold-link-hint svg {
-            flex-shrink: 0;
+            font-size: 0.9rem;
         }
 
         /* Layout Overrides to fill screen but prevent overflow */
@@ -1286,6 +1415,8 @@
             white-space: nowrap;
         }
 
+
+
         .search-url-text a {
             color: inherit;
             text-decoration: none;
@@ -1549,19 +1680,65 @@
             content: '⏱ ';
         }
 
-        /* Responsive */
+        /* Responsive - Tablet (1024px) */
+        @media (max-width: 1024px) {
+            .header {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 1rem;
+            }
+            
+            .sync-btn {
+                width: 100%;
+                justify-content: center;
+            }
+            
+            .property-card {
+                flex-direction: column;
+            }
+            
+            .property-sold-sidebar {
+                flex: none;
+                width: 100%;
+                max-height: 400px;
+                overflow-y: auto;
+                border-left: none;
+                border-top: 1px solid var(--card-border);
+            }
+            
+            .stats-bar {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 1rem;
+            }
+            
+            .stat-items-group {
+                flex-wrap: wrap;
+                gap: 1rem;
+            }
+            
+            .sort-group {
+                width: 100%;
+            }
+            
+            .sort-select {
+                flex: 1;
+            }
+        }
+        
+        /* Responsive - Mobile (768px) */
         @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+            
             .title {
-                font-size: 1.75rem;
+                font-size: 1.5rem;
+                word-break: break-word;
             }
 
             .properties-grid {
                 grid-template-columns: 1fr;
-            }
-
-            .stats-bar {
-                flex-direction: column;
-                align-items: flex-start;
             }
             
             .progress-header {
@@ -1574,7 +1751,242 @@
                 flex-direction: column;
                 align-items: flex-start;
             }
+            
+            .search-url-bar {
+                padding: 0.75rem;
+            }
+            
+            .search-url-text {
+                font-size: 0.75rem;
+                white-space: normal;
+                word-break: break-all;
+            }
+            
+            .stat-items-group {
+                width: 100%;
+                justify-content: space-between;
+            }
+            
+            .stat-item {
+                flex: 1;
+                min-width: 80px;
+            }
+            
+            /* Sold sidebar on mobile - full width horizontal scroll for cards */
+            .sold-properties-list {
+                display: flex;
+                flex-direction: row;
+                overflow-x: auto;
+                gap: 0.75rem;
+                padding-bottom: 0.5rem;
+            }
+            
+            .sold-property-item {
+                flex: 0 0 280px;
+                min-width: 280px;
+            }
         }
+        
+        /* Responsive - Small Mobile (480px) */
+        @media (max-width: 480px) {
+            .title {
+                font-size: 1.25rem;
+            }
+            
+            .sync-btn {
+                font-size: 0.875rem;
+                padding: 0.625rem 1rem;
+            }
+            
+            .stat-label {
+                font-size: 0.65rem;
+            }
+            
+            .stat-value {
+                font-size: 1rem;
+            }
+            
+            .property-info-section {
+                padding: 1rem;
+            }
+            
+            .price-amount {
+                font-size: 1.25rem;
+            }
+            
+            .property-details-grid {
+                grid-template-columns: 1fr;
+                gap: 0.75rem;
+            }
+        }
+    /* NEW SOLD CARD CSS - RE-ADDED AT END TO OVERRIDE CONFLICTS */
+    .sold-item-row {
+        background: white;
+        border: 1px solid var(--card-border);
+        border-radius: 8px;
+        /* overflow: hidden;  <-- REMOVED TO PREVENT CLIPPING */
+        margin-bottom: 1rem;
+        display: flex !important;
+        flex-direction: column !important;
+        min-height: 280px !important;
+        max-height: 400px !important;  /* Add max height */
+        height: auto !important;
+        transition: all 0.2s ease;
+        cursor: pointer;
+        position: relative;
+        overflow: hidden;  /* Hide overflow on card itself */
+    }
+
+    .sold-content-wrapper {
+        padding: 0.75rem;
+        background: white;
+        overflow-y: auto;    /* Enable vertical scrolling */
+        max-height: 220px;   /* Limit content height to enable scroll */
+        flex: 1;
+    }
+
+    .sold-content-wrapper::-webkit-scrollbar {
+        width: 4px;
+    }
+
+    .sold-content-wrapper::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 4px;
+    }
+
+    .sold-content-wrapper::-webkit-scrollbar-thumb {
+        background: #ccc;
+        border-radius: 4px;
+    }
+
+    .sold-content-wrapper::-webkit-scrollbar-thumb:hover {
+        background: #999;
+    }
+
+    .sold-item-row:hover {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        border-color: var(--secondary);
+        transform: translateY(-2px);
+    }
+
+    .sold-image-col {
+        position: relative;
+        width: 100%;
+        height: 160px !important;
+        min-height: 160px;
+        background: #f0f0f0;
+        overflow: hidden;
+        display: block !important;
+        border-bottom: 1px solid #eee; /* Separator */
+    }
+
+    .sold-image-container,
+    .sold-image-slides {
+        width: 100%;
+        height: 100%;
+        position: relative;
+    }
+
+    .sold-row-slide {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        z-index: 1;
+    }
+
+    .sold-row-slide.active {
+        opacity: 1;
+        z-index: 2;
+    }
+
+    .sold-row-slide img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    .sold-thumb-nav {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        background: rgba(255, 255, 255, 0.9);
+        border: none;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        font-size: 16px;
+        color: #333;
+        cursor: pointer;
+        z-index: 5;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        transition: opacity 0.2s;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+
+    .sold-image-col:hover .sold-thumb-nav {
+        opacity: 1;
+    }
+
+    .sold-thumb-nav.left { left: 8px; }
+    .sold-thumb-nav.right { right: 8px; }
+    .sold-thumb-nav:hover { background: white; color: var(--primary); }
+
+    .sold-content-wrapper {
+        padding: 0.75rem;
+        background: white;
+    }
+
+    .sold-row-address {
+        font-weight: 600;
+        font-size: 0.9rem;
+        color: var(--text-primary);
+        margin-bottom: 0.25rem;
+        line-height: 1.3;
+    }
+
+    .sold-row-type {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        margin-bottom: 0.5rem;
+    }
+
+    .sold-row-specs {
+        display: flex;
+        gap: 0.75rem;
+        margin-bottom: 0.75rem;
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+    }
+
+    .sold-spec {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+    }
+
+    .sold-history-col {
+        background: #f8f9fa;
+        border-radius: 6px;
+        padding: 0.5rem;
+        margin-top: 0.5rem;
+    }
+    
+    .sold-transaction-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        padding: 0.25rem 0;
+        border-bottom: 1px dotted var(--card-border);
+    }
     </style>
 @endsection
 
@@ -1699,7 +2111,8 @@
         let propertyUrls = [];
         let loadedProperties = [];
         let currentPage = 1;
-        const itemsPerPage = 100; // Increased from 10 to show more properties per page and reduce pagination issues
+        let currentSort = 'default'; // Track current sort
+        const itemsPerPage = 20;  // Changed from 100 to 20 per user request
         
         // Image slider state
         let currentImageIndexes = {};
@@ -1714,6 +2127,7 @@
         const totalCount = document.getElementById('totalCount');
         const loadedCount = document.getElementById('loadedCount');
         const syncBtn = document.getElementById('syncBtn');
+        const sortSelect = document.getElementById('sortSelect'); // Move here
         
         // Progress bar elements
         const importProgress = document.getElementById('importProgress');
@@ -1729,14 +2143,17 @@
         // Search context from server
         window.searchContext = {!! json_encode($search ?? null) !!};
 
-
-
         // Load properties on startup
         document.addEventListener('DOMContentLoaded', async () => {
             // Attach import button handler after DOM is loaded
             syncBtn.addEventListener('click', async () => {
                 await importAllProperties(true);
             });
+            
+            // Set initial sort if saved or default
+            if (sortSelect) {
+                sortSelect.value = currentSort;
+            }
             
             // On page load, try to load complete property data from database
             await loadFromDatabaseOnStartup();
@@ -1748,8 +2165,8 @@
                 loading.classList.add('active');
                 emptyState.classList.remove('active');
                 
-                // Load first page
-                const data = await loadPropertiesPage(1);
+                // Load first page with current sort
+                const data = await loadPropertiesPage(1, currentSort);
                 
                 if (!data || !data.properties || data.properties.length === 0) {
                     loading.classList.remove('active');
@@ -1762,67 +2179,101 @@
                 // Show stats bar and initial data
                 statsBar.style.display = 'flex';
                 totalCount.textContent = data.total;
-                loadedCount.textContent = data.properties.length;
                 
-                loadedProperties = data.properties;
-                propertyUrls = data.properties.map(p => ({ url: p.url, id: p.id }));
+                // CRITICAL: Reset arrays completely before loading (prevents stale data)
+                loadedProperties = [];
+                propertyUrls = [];
                 
-                console.log(`✓ Loaded page 1: ${data.properties.length} properties`);
-                console.log(`Total: ${data.total}, Pages: ${data.total_pages}, Has more: ${data.has_more}`);
-                console.log(`Images in first property: ${data.properties[0]?.images?.length || 0}`);
-                console.log(`Sold data in first property: ${data.properties[0]?.sold_properties?.length || 0}`);
+                // Track loaded IDs with a Set for O(1) lookup
+                const loadedIds = new Set();
+                
+                // Add page 1 data
+                data.properties.forEach(p => {
+                    const id = String(p.id);
+                    if (!loadedIds.has(id)) {
+                        loadedIds.add(id);
+                        loadedProperties.push(p);
+                        propertyUrls.push({ url: p.url, id: id });
+                    }
+                });
+                
+                // Store the total from backend - this is the source of truth
+                const backendTotal = data.total;
+                
+                // Show progress capped at total - never exceed total
+                loadedCount.textContent = Math.min(loadedProperties.length, backendTotal);
+                
+                console.log(`✓ Loaded page 1: ${loadedProperties.length} properties`);
+                console.log(`Backend total: ${backendTotal}, Pages: ${data.total_pages}, Has more: ${data.has_more}`);
                 
                 displayProperties(loadedProperties);
                 loading.classList.remove('active');
-                showAlert('success', `Loaded ${data.properties.length} of ${data.total} properties`);
+                showAlert('success', `Loaded ${loadedProperties.length} of ${backendTotal} properties`);
                 
                 // If there are more pages, load them in background
-                if (data.has_more) {
-                    console.log(`Loading remaining pages in background...`);
+                if (data.has_more && data.total_pages > 1) {
+                    console.log(`Loading remaining ${data.total_pages - 1} pages in background...`);
                     for (let page = 2; page <= data.total_pages; page++) {
-                        const pageData = await loadPropertiesPage(page);
-                        if (pageData && pageData.properties) {
-                            loadedProperties = loadedProperties.concat(pageData.properties);
-                            propertyUrls = propertyUrls.concat(pageData.properties.map(p => ({ url: p.url, id: p.id })));
+                        const pageData = await loadPropertiesPage(page, currentSort);
+                        if (pageData && pageData.properties && pageData.properties.length > 0) {
+                            let addedCount = 0;
+                            pageData.properties.forEach(p => {
+                                const id = String(p.id);
+                                if (!loadedIds.has(id)) {
+                                    loadedIds.add(id);
+                                    loadedProperties.push(p);
+                                    propertyUrls.push({ url: p.url, id: id });
+                                    addedCount++;
+                                }
+                            });
                             
-                            // Update loaded count progressively
-                            loadedCount.textContent = loadedProperties.length;
-                            console.log(`✓ Loaded page ${page}: ${loadedProperties.length} / ${data.total} properties`);
-                            
-                            // Refresh display if on first page to show new items
-                            if (currentPage === 1) {
-                                displayProperties(loadedProperties);
-                            }
+                            // Update progress capped at backendTotal
+                            loadedCount.textContent = Math.min(loadedProperties.length, backendTotal);
+                            console.log(`✓ Page ${page}: +${addedCount} new (${Math.min(loadedProperties.length, backendTotal)} / ${backendTotal})`);
+                        }
+                        
+                        // Safety check: stop if we've loaded enough
+                        if (loadedIds.size >= backendTotal) {
+                            console.log(`Reached backend total (${backendTotal}), stopping.`);
+                            break;
                         }
                     }
-                    showAlert('success', `All ${loadedProperties.length} properties loaded successfully!`);
+                    
+                    // Final count sync - ensure displayed count matches backend total
+                    loadedCount.textContent = backendTotal;
+                    showAlert('success', `All ${backendTotal} properties loaded successfully!`);
                 }
                 
             } catch (error) {
-                console.error('=== ERROR LOADING FROM DATABASE ===');
-                console.error('Error:', error);
-                console.error('Stack:', error.stack);
+                console.error('Error loading database properties:', error);
                 loading.classList.remove('active');
                 emptyState.classList.add('active');
-                statsBar.style.display = 'none';
+                showAlert('error', 'Failed to load properties: ' + error.message);
             }
         }
         
         // Load a single page of properties from database
-        async function loadPropertiesPage(page) {
+        async function loadPropertiesPage(page, sort = 'default') {
             try {
-                const url = window.searchContext 
-                    ? `/api/internal-property/load-from-db?search_id=${window.searchContext.id}&page=${page}&per_page=50` 
-                    : `/api/internal-property/load-from-db?page=${page}&per_page=50`;
+                // Use the correct API endpoint for database loading
+                let url = `/api/internal-property/load-from-db?page=${page}&per_page=${itemsPerPage}&sort=${sort}`;
+                
+                // Add search_id if we have a search context
+                if (window.searchContext && window.searchContext.id) {
+                    url += `&search_id=${window.searchContext.id}`;
+                }
                 
                 console.log(`Loading page ${page} from:`, url);
                 
                 const response = await fetch(url, {
                     method: 'GET',
                     credentials: 'same-origin',
+                    cache: 'no-store', // Prevent caching of old data
                     headers: {
                         'Accept': 'application/json',
-                        'X-Requested-With': 'XMLHttpRequest'
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache'
                     }
                 });
                 
@@ -1891,21 +2342,30 @@
                 loadedCount.textContent = '0';
 
                 // Instantly display all properties with placeholders
-                loadedProperties = propertyUrls.map((urlData, index) => ({
-                    id: urlData.id || index,
-                    url: urlData.url,
-                    title: urlData.title || 'Property for sale',
-                    price: urlData.price || 'Price on request',
-                    address: urlData.address || 'Loading...',
-                    property_type: '',
-                    bedrooms: '',
-                    bathrooms: '',
-                    size: '',
-                    tenure: '',
-                    reduced_on: '',
-                    images: [],
-                    loading: true
-                }));
+                loadedProperties = propertyUrls.map((urlData, index) => {
+                    // Extract property ID from URL for reliable matching
+                    let propId = urlData.id || null;
+                    if (!propId && urlData.url) {
+                        const idMatch = urlData.url.match(/properties\/(\d+)/);
+                        if (idMatch) propId = idMatch[1];
+                    }
+                    
+                    return {
+                        id: propId || `temp-${index}`, // Use extracted ID or temp placeholder
+                        url: urlData.url,
+                        title: urlData.title || 'Property for sale',
+                        price: urlData.price || 'Price on request',
+                        address: urlData.address || 'Loading...',
+                        property_type: '',
+                        bedrooms: '',
+                        bathrooms: '',
+                        size: '',
+                        tenure: '',
+                        reduced_on: '',
+                        images: [],
+                        loading: true
+                    };
+                });
 
                 displayProperties(loadedProperties);
                 loading.classList.remove('active');
@@ -1927,8 +2387,8 @@
 
         // Load property details with CONCURRENT batches (OPTIMIZED FOR SPEED)
         async function loadDetailsConcurrently(urls) {
-            const batchSize = 20; // Properties per chunk
-            const maxConcurrent = 6; // Chunks processed simultaneously
+            const batchSize = 5; // Reduced from 20 to 5 to provide faster feedback and avoid timeouts
+            const maxConcurrent = 2; // Reduced from 6 to 2 to prevent overwhelming the local development server
             let processed = 0;
             const totalBatches = Math.ceil(urls.length / batchSize);
             const startTime = Date.now();
@@ -1972,11 +2432,35 @@
                                 
                                 // Update properties with full details
                                 result.properties.forEach(prop => {
-                                    // Match by URL OR by property ID (more robust fallback)
+                                    // Extract property ID from the returned URL (more reliable)
+                                    let returnedPropId = prop.id;
+                                    if (!returnedPropId && prop.url) {
+                                        const idMatch = prop.url.match(/properties\/(\d+)/);
+                                        if (idMatch) returnedPropId = idMatch[1];
+                                    }
+                                    
+                                    // First, try exact URL match (fastest if URLs are identical)
                                     let index = loadedProperties.findIndex(p => p.url === prop.url);
                                     
-                                    if (index === -1 && prop.id) {
-                                        index = loadedProperties.findIndex(p => p.id == prop.id || (p.url && p.url.includes(prop.id)));
+                                    // If no exact match, try matching by property ID in URL (most reliable fallback)
+                                    if (index === -1 && returnedPropId) {
+                                        index = loadedProperties.findIndex(p => {
+                                            // Check if the placeholder URL contains this property ID
+                                            if (p.url && p.url.includes(`properties/${returnedPropId}`)) return true;
+                                            // Check if placeholder has a matching ID
+                                            if (p.id == returnedPropId) return true;
+                                            return false;
+                                        });
+                                    }
+                                    
+                                    // Last resort: strip hash/query fragments and compare base URLs
+                                    if (index === -1 && prop.url) {
+                                        const normalizedUrl = prop.url.split('#')[0].split('?')[0];
+                                        index = loadedProperties.findIndex(p => {
+                                            if (!p.url) return false;
+                                            const normalizedPUrl = p.url.split('#')[0].split('?')[0];
+                                            return normalizedUrl === normalizedPUrl;
+                                        });
                                     }
 
                                     if (index !== -1) {
@@ -1984,6 +2468,7 @@
                                         const mergedProperty = {
                                             ...loadedProperties[index], 
                                             ...prop, 
+                                            id: returnedPropId || prop.id || loadedProperties[index].id, // Ensure ID is set correctly
                                             loading: false,
                                             // Explicitly ensure these arrays are set
                                             images: prop.images || [],
@@ -1993,7 +2478,7 @@
                                         loadedProperties[index] = mergedProperty;
                                         
                                         // Debug: Verify merged data
-                                        console.log(`Merged property ${prop.id}:`, {
+                                        console.log(`Merged property ${returnedPropId}:`, {
                                             id: mergedProperty.id,
                                             images: mergedProperty.images?.length || 0,
                                             sold: mergedProperty.sold_properties?.length || 0,
@@ -2004,17 +2489,22 @@
                                         processed++;
                                         loadedCount.textContent = processed;
                                     } else {
-                                        console.warn(`Could not find placeholder for property ${prop.id} / ${prop.url}`);
+                                        console.warn(`Could not find placeholder for property ${returnedPropId} / ${prop.url}`);
                                     }
                                 });
-                                
-                                // Update progress after each chunk completes
-                                updateProgress(processed, urls.length, startTime, batchIndex + 1, totalBatches);
+                            } else {
+                                console.error(`Chunk ${batchIndex + 1}/${totalBatches} failed or empty:`, result.message || 'Unknown error');
                             }
+                            
+                            // ALWAYS update progress, even if failed, so the chunk counter moves
+                            updateProgress(processed, urls.length, startTime, batchIndex + 1, totalBatches);
+                            
                             return result;
                         })
                         .catch(err => {
                             console.error(`Chunk ${batchIndex + 1} failed:`, err);
+                            // Even on catch, try to update progress so we don't hang
+                            updateProgress(processed, urls.length, startTime, batchIndex + 1, totalBatches);
                             return { success: false, error: err.message };
                         });
                     
@@ -2029,7 +2519,12 @@
             // Hide progress bar and show completion
             hideProgressBar();
             syncBtn.disabled = false;
-            showAlert('success', `✓ Import complete! ${processed} properties with full data loaded 🎉`);
+            
+            if (processed > 0) {
+                showAlert('success', `✓ Import complete! ${processed} properties with full data loaded 🎉`);
+            } else {
+                showAlert('error', 'Import completed but no properties were updated. Check logs.');
+            }
         }
         
         // Progress Bar Helper Functions
@@ -2053,7 +2548,7 @@
             propertiesImported.textContent = current;
             
             // Calculate and update percentage
-            const percentage = Math.round((current / total) * 100);
+            const percentage = total > 0 ? Math.round((current / total) * 100) : 0;
             progressBarFill.style.width = `${percentage}%`;
             progressPercentage.textContent = `${percentage}%`;
             
@@ -2109,13 +2604,18 @@
                 });
 
                 if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
+                    throw new Error(`HTTP ${response.status} - ${response.statusText}`);
                 }
 
-                const data = await response.json();
-                console.log(`Batch ${batchNum}/${totalBatches} completed:`, data.processed, 'properties');
-                
-                return data;
+                const text = await response.text();
+                try {
+                    const data = JSON.parse(text);
+                    console.log(`Batch ${batchNum}/${totalBatches} completed:`, data.processed, 'properties');
+                    return data;
+                } catch (e) {
+                    console.error("Invalid JSON response:", text.substring(0, 200) + "...");
+                    throw new Error("Invalid JSON response from server");
+                }
                 
             } catch (error) {
                 console.error(`Batch ${batchNum} error:`, error);
@@ -2419,13 +2919,29 @@
             const imageCount = hasImages ? property.images.length : 0;
             const loadingClass = property.loading ? 'loading' : '';
             
+            // Debug log
+            if (index < 3) console.log(`Rendering property ${property.id}`, property);
+            
             // Use first image or placeholder
             const mainImage = hasImages ? property.images[0] : `https://via.placeholder.com/600x400/e0e0e0/666666?text=Loading+Image`;
 
-            // Format address with house number if possible
-            const houseNumber = property.house_number || '';
-            const roadName = property.road_name || property.address || '';
-            const displayAddress = houseNumber ? `<span class="address-house">${houseNumber},</span> <span class="address-road">${roadName}</span>` : roadName;
+            // Format address with house number if possible - styled to match sold property cards
+            // Parse house number from address if not provided separately
+            let houseNumber = property.house_number || '';
+            let roadName = property.road_name || property.address || '';
+            
+            // If no house_number, try to extract from address (UK format: "123 Road Name, City")
+            if (!houseNumber && roadName) {
+                const addrMatch = roadName.match(/^(\d+[a-zA-Z]?)\s*,?\s*(.+)$/);
+                if (addrMatch) {
+                    houseNumber = addrMatch[1];
+                    roadName = addrMatch[2];
+                }
+            }
+            
+            const displayAddress = houseNumber 
+                ? `<span style="font-weight: 800; color: #333;">${houseNumber},</span> ${roadName}` 
+                : roadName;
 
             // Create property card HTML - Split Layout
             return `
@@ -2460,7 +2976,7 @@
                                 </div>
                             ` : ''}
                             
-                            <h3 class="property-address-title">${displayAddress}</h3>
+                            <h3 class="property-address-title" style="font-size: 1rem; font-weight: 600; margin-bottom: 0.5rem;">${displayAddress}</h3>
                             <div class="property-url-wrapper" onclick="event.stopPropagation()">
                                 <div class="property-url-display" id="url-display-${property.id}">
                                     <div class="property-url" title="${property.url}">
@@ -2495,7 +3011,7 @@
                                     return `
                                         <div class="avg-sold-price">
                                             <span class="avg-label">Avg Sold Price</span>
-                                            <span class="avg-value">${formattedAvg}</span>
+                                            <span class="avg-value" style="font-size: 1.15rem; font-weight: 700;">${formattedAvg}</span>
                                             <span class="avg-count">(${count} sale${count !== 1 ? 's' : ''} in period)</span>
                                         </div>
                                     `;
@@ -2574,68 +3090,141 @@
                         
                         <div class="sold-list-container">
                             ${property.sold_properties && property.sold_properties.length > 0 ? 
-                                property.sold_properties.map(sold => {
+                                property.sold_properties.map((sold, soldIndex) => {
                                     const soldLink = sold.detail_url || property.sold_link || '#';
-                                    const soldPhoto = sold.image_url || sold.map_url || 'https://via.placeholder.com/80x60/eee/999?text=No+Photo';
                                     const soldHouse = sold.house_number || '';
                                     const soldRoad = sold.road_name || sold.location || '';
                                     const bedrooms = sold.bedrooms || '-';
                                     const bathrooms = sold.bathrooms || '-';
                                     
+                                    // Get first transaction for overlay display
+                                    // Sort transactions by date descending (Newest first)
+                                    const sortedTrans = sold.transactions ? [...sold.transactions].sort((a, b) => {
+                                        const dateA = new Date(a.sold_date || a.date || 0);
+                                        const dateB = new Date(b.sold_date || b.date || 0);
+                                        return dateB - dateA; // Descending
+                                    }) : [];
+
+                                    // Get first transaction for overlay display
+                                    const latestTrans = sortedTrans.length > 0 ? sortedTrans[0] : null;
+                                    const displayPrice = latestTrans ? (latestTrans.sold_price || latestTrans.price || '') : '';
+                                    const displayDate = latestTrans ? (latestTrans.sold_date || latestTrans.date || '') : '';
+                                    
+                                    // Get images array - use images if available, fallback to image_url, then map_url
+                                    let soldImages = [];
+                                    if (sold.images && sold.images.length > 0) {
+                                        soldImages = sold.images;
+                                    } else if (sold.image_url) {
+                                        soldImages = [sold.image_url];
+                                    } else if (sold.map_url) {
+                                        soldImages = [sold.map_url]; // Use map as fallback
+                                    } else {
+                                        soldImages = ['https://via.placeholder.com/300x140/e8e8e8/888?text=No+Photo'];
+                                    }
+                                    const hasMultipleImages = soldImages.length > 1;
+                                    const soldCardId = `${property.id}-${soldIndex}`;
+                                    
                                     return `
-                                    <a href="${soldLink}" target="_blank" class="sold-item-card-link" onclick="event.stopPropagation()">
-                                        <div class="sold-item-card">
-                                            <div class="sold-property-photo">
-                                                <img src="${soldPhoto}" alt="Property" loading="lazy" onerror="this.src='https://via.placeholder.com/260x180/eee/999?text=No+Photo'">
-                                            </div>
-                                            <div class="sold-property-main">
-                                                <div class="sold-property-type">
-                                                    ${sold.property_type || 'Property'}
-                                                </div>
-                                                <div class="sold-property-location" title="${soldHouse ? soldHouse + ', ' : ''}${soldRoad}">
-                                                    ${soldHouse ? `<span style="color: var(--primary); font-weight: 700;">${soldHouse},</span> ` : ''}${soldRoad}
-                                                </div>
-                                                
-                                                <!-- Bedrooms and Bathrooms -->
-                                                <div class="sold-property-features">
-                                                    <div class="sold-feature-item">
-                                                        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
-                                                        </svg>
-                                                        <span>${bedrooms}</span>
-                                                    </div>
-                                                    <div class="sold-feature-item">
-                                                        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z"></path>
-                                                        </svg>
-                                                        <span>${bathrooms}</span>
-                                                    </div>
-                                                    ${sold.tenure ? `<div class="sold-feature-item"><span class="sold-tenure-badge">${sold.tenure}</span></div>` : ''}
+                                    <div class="sold-item-row" onclick="window.open('${soldLink}', '_blank')">
+                                        <!-- 1. Image Column (Top) -->
+                                        <div class="sold-image-col">
+                                            <div class="sold-image-container">
+                                                <div class="sold-image-slides" id="sold-slides-${soldCardId}">
+                                                    ${soldImages.map((img, imgIdx) => `
+                                                        <div class="sold-row-slide ${imgIdx === 0 ? 'active' : ''}">
+                                                            <img src="${img}" alt="Sold property" loading="lazy" onerror="this.src='https://via.placeholder.com/400x300/e8e8e8/888?text=Image+Not+Found'">
+                                                        </div>
+                                                    `).join('')}
                                                 </div>
                                                 
-                                                <div class="sold-property-transactions">
-                                                    ${sold.prices && sold.prices.length > 0 ? 
-                                                        sold.prices.slice(0, 3).map(price => `
-                                                            <div class="sold-tx-row">
-                                                                <span class="sold-tx-date">${price.sold_date || '-'}</span>
-                                                                <span class="sold-tx-price">${price.sold_price || '-'}</span>
-                                                            </div>
-                                                        `).join('')
-                                                    : `<div style="font-size:0.8rem; color:var(--text-secondary);">No price data</div>`}
-                                                </div>
+                                                ${hasMultipleImages ? `
+                                                    <button class="sold-thumb-nav left" onclick="event.stopPropagation(); navigateSoldCardSlide('${soldCardId}', -1, ${soldImages.length})">‹</button>
+                                                    <button class="sold-thumb-nav right" onclick="event.stopPropagation(); navigateSoldCardSlide('${soldCardId}', 1, ${soldImages.length})">›</button>
+                                                    <div class="sold-photo-count" id="sold-counter-${soldCardId}">1/${soldImages.length}</div>
+                                                ` : ''}
                                             </div>
                                         </div>
-                                    </a>
+
+                                        <!-- Content Wrapper -->
+                                        <div class="sold-content-wrapper">
+                                            <!-- 1. LOCATION (Address) - First after image -->
+                                            <div class="sold-row-address" style="font-weight: 700; font-size: 0.95rem; color: #333; margin-bottom: 6px;" title="${soldHouse ? soldHouse + ', ' : ''}${soldRoad}">
+                                               ${soldHouse ? `<span>${soldHouse},</span>` : ''} ${soldRoad}
+                                            </div>
+                                            
+                                            <!-- 2. BEDS & BATHS - Second -->
+                                            <div class="sold-row-specs" style="display: flex; gap: 12px; margin-bottom: 8px; font-size: 0.85rem; color: #555;">
+                                                <div class="sold-spec" style="display: flex; align-items: center; gap: 4px;" title="Bedrooms">
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                        <path d="M2 20v-8a2 2 0 012-2h16a2 2 0 012 2v8"></path>
+                                                        <path d="M4 10V6a2 2 0 012-2h12a2 2 0 012 2v4"></path>
+                                                        <path d="M2 20h20"></path>
+                                                    </svg>
+                                                    <span>${bedrooms !== '-' ? bedrooms : '?'} Bedrooms</span>
+                                                </div>
+                                                
+                                                <div class="sold-spec" style="display: flex; align-items: center; gap: 4px;" title="Bathrooms">
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                        <path d="M4 12h16a1 1 0 011 1v3a4 4 0 01-4 4H7a4 4 0 01-4-4v-3a1 1 0 011-1z"></path>
+                                                        <path d="M6 12V5a2 2 0 012-2h1"></path>
+                                                        <circle cx="9" cy="5" r="1"></circle>
+                                                    </svg>
+                                                    <span>${bathrooms !== '-' ? bathrooms : '?'} Bathrooms</span>
+                                                </div>
+                                            </div>
+
+                                            <!-- 3. SOLD DATE & PRICE - TABLE FORMAT -->
+                                            <table style="width: 100%; border-collapse: collapse; background: #f8f9fa; border-radius: 6px; overflow: hidden; font-size: 0.85rem;">
+                                                <thead>
+                                                    <tr style="background: #e9ecef;">
+                                                        <th style="padding: 6px 10px; text-align: left; font-weight: 600; color: #666; font-size: 0.75rem; text-transform: uppercase;">Sold Date</th>
+                                                        <th style="padding: 6px 10px; text-align: right; font-weight: 600; color: #666; font-size: 0.75rem; text-transform: uppercase;">Price</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr>
+                                                        <td style="padding: 8px 10px; color: #333;">${displayDate || 'Unknown'}</td>
+                                                        <td style="padding: 8px 10px; text-align: right; font-weight: 700; color: #10b981;">${displayPrice || 'TBC'}</td>
+                                                    </tr>
+                                                    ${sortedTrans.length > 1 ? sortedTrans.slice(1, 3).map(trans => `
+                                                    <tr style="border-top: 1px solid #ddd;">
+                                                        <td style="padding: 6px 10px; color: #666; font-size: 0.8rem;">${trans.sold_date || trans.date || '-'}</td>
+                                                        <td style="padding: 6px 10px; text-align: right; font-weight: 600; color: #333; font-size: 0.85rem;">${trans.sold_price || trans.price || '-'}</td>
+                                                    </tr>
+                                                    `).join('') : ''}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
                                     `;
-                                }).join('') 
-                            :   `<div style="color:var(--text-secondary); text-align:center; padding:2rem; font-style:italic;">
-                                    No sold history available
-                                </div>`
-                            }
+                                }).join('') : ''}
                         </div>
                     </div>
                 </div>
             `;
+        }
+
+        // Sold Carousel Navigation
+        function navigateSoldSlide(id, direction, count) {
+            const slidesContainer = document.getElementById(`sold-slides-${id}`);
+            if (!slidesContainer) return;
+            
+            // Find current active index
+            let activeIndex = 0;
+            // FIX: Use .sold-row-slide (new class) instead of .sold-slide
+            const slides = slidesContainer.querySelectorAll('.sold-row-slide');
+            slides.forEach((slide, idx) => {
+                if (slide.classList.contains('active')) activeIndex = idx;
+                slide.classList.remove('active');
+            });
+            
+            // Calculate new index
+            let newIndex = activeIndex + direction;
+            if (newIndex < 0) newIndex = count - 1;
+            if (newIndex >= count) newIndex = 0;
+            
+            // Activate new slide
+            slides[newIndex].classList.add('active');
         }
         
         // Navigate image slides
@@ -2687,6 +3276,38 @@
 
             if (counter) {
                 counter.textContent = `${newIndex + 1} / ${totalImages}`;
+            }
+        }
+
+        // Navigate Sold Card Carousel
+        function navigateSoldCardSlide(cardId, direction, totalImages) {
+            const slidesContainer = document.getElementById(`sold-slides-${cardId}`);
+            const counter = document.getElementById(`sold-counter-${cardId}`);
+            if (!slidesContainer) return;
+            
+            // Support both old (.sold-slide) and new (.sold-row-slide) classes just in case
+            let slides = slidesContainer.querySelectorAll('.sold-row-slide');
+            if (slides.length === 0) {
+                slides = slidesContainer.querySelectorAll('.sold-slide');
+            }
+            
+            let currentIndex = Array.from(slides).findIndex(slide => slide.classList.contains('active'));
+            if (currentIndex === -1) currentIndex = 0;
+            
+            // Remove active from current slide
+            slides[currentIndex].classList.remove('active');
+            
+            // Calculate new index with wrapping
+            let newIndex = currentIndex + direction;
+            if (newIndex < 0) newIndex = totalImages - 1;
+            if (newIndex >= totalImages) newIndex = 0;
+            
+            // Set new active slide
+            slides[newIndex].classList.add('active');
+            
+            // Update counter
+            if (counter) {
+                counter.textContent = `${newIndex + 1}/${totalImages}`;
             }
         }
 
@@ -2924,6 +3545,85 @@
             
             urlEdit.classList.remove('active');
             urlDisplay.style.display = 'flex';
+        }
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('🚀 Application initialized');
+            
+            // Check if we have a search context
+            const searchId = window.searchContext ? window.searchContext.id : 'all';
+            console.log(`Context: Search ID ${searchId}`);
+            
+            // Initial load of properties from database
+            initialLoad();
+        });
+
+        // Initial load function
+        async function initialLoad() {
+            try {
+                loading.classList.add('active');
+                emptyState.classList.remove('active');
+                
+                // Load first page
+                const data = await loadPropertiesPage(1, currentSort);
+                
+                if (!data || !data.properties || data.properties.length === 0) {
+                    loading.classList.remove('active');
+                    emptyState.classList.add('active');
+                    console.log('No properties in database. Waiting for import.');
+                    return;
+                }
+                
+                // Show stats bar and initial data
+                statsBar.style.display = 'flex';
+                const backendTotal = data.total;
+                totalCount.textContent = backendTotal;
+                loadedCount.textContent = Math.min(data.properties.length, backendTotal); // Progress capped at total
+                
+                // Set global state
+                loadedProperties = data.properties;
+                propertyUrls = data.properties.map(p => ({ url: p.url, id: p.id }));
+                
+                console.log(`✓ Initial load: ${data.properties.length} properties`);
+                
+                // Render properties
+                displayProperties(loadedProperties);
+                loading.classList.remove('active');
+                
+                // If there are more pages, trigger background load of remaining data
+                if (data.has_more) {
+                    console.log(`Loading ${data.total_pages - 1} more pages in background...`);
+                    // Load remaining pages in background (non-blocking)
+                    loadRemainingPagesInBackground(data.total_pages);
+                }
+                
+            } catch (error) {
+                console.error('Initial load failed:', error);
+                loading.classList.remove('active');
+                emptyState.classList.add('active');
+                showAlert('error', 'Failed to load properties: ' + error.message);
+            }
+        }
+
+        // Helper to load remaining pages
+        async function loadRemainingPagesInBackground(totalPages) {
+            for (let page = 2; page <= totalPages; page++) {
+                try {
+                    const pageData = await loadPropertiesPage(page, currentSort);
+                    if (pageData && pageData.properties) {
+                        loadedProperties = loadedProperties.concat(pageData.properties);
+                        propertyUrls = propertyUrls.concat(pageData.properties.map(p => ({ url: p.url, id: p.id })));
+                        
+                        // Update progress capped at backend total
+                        const total = parseInt(totalCount.textContent) || loadedProperties.length;
+                        loadedCount.textContent = Math.min(loadedProperties.length, total);
+                        console.log(`Background loaded page ${page}: ${pageData.properties.length} more (${loadedCount.textContent}/${total})`);
+                    }
+                } catch (e) {
+                    console.error(`Background load page ${page} failed:`, e);
+                }
+            }
+            console.log('✓ All pages loaded in background');
         }
     </script>
 @endsection

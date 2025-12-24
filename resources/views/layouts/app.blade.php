@@ -169,9 +169,21 @@
         .main-content {
             padding: 2rem;
             flex: 1;
-            max-width: 1200px;
+            max-width: 100%;
             width: 100%;
             margin: 0 auto;
+            overflow-x: hidden;
+        }
+
+        /* Mobile Menu Toggle */
+        .mobile-menu-btn {
+            display: none;
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            color: var(--text-primary);
+            cursor: pointer;
+            padding: 0.5rem;
         }
 
         /* Footer */
@@ -185,19 +197,48 @@
             margin-top: auto;
         }
 
-        /* Responsive */
+        /* Responsive - Tablet */
+        @media (max-width: 1024px) {
+            .main-content {
+                padding: 1.5rem;
+            }
+            
+            .navbar {
+                padding: 1rem;
+            }
+        }
+
+        /* Responsive - Mobile */
         @media (max-width: 768px) {
+            .mobile-menu-btn {
+                display: block;
+            }
+            
             .sidebar {
-                transform: translateX(-100%);
+                transform: translateX(-100%) !important;
                 transition: transform 0.3s ease;
+                width: 260px !important;
             }
             
             .sidebar.active {
-                transform: translateX(0);
+                transform: translateX(0) !important;
             }
 
             .content-area {
-                margin-left: 0;
+                margin-left: 0 !important;
+                width: 100% !important;
+            }
+            
+            .main-content {
+                padding: 1rem;
+            }
+            
+            .navbar {
+                padding: 0.75rem 1rem;
+            }
+            
+            .navbar-brand {
+                font-size: 1rem;
             }
         }
     </style>
@@ -237,6 +278,12 @@
             
             // Store preference in localStorage
             localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+        }
+        
+        // Mobile sidebar toggle
+        function toggleMobileSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.toggle('active');
         }
 
         // Apply stored preference on load

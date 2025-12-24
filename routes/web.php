@@ -30,6 +30,7 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/api/internal-property/fetch-all', [InternalPropertyController::class, 'fetchAllProperties'])->name('internal-property.fetch-all');
     Route::post('/api/internal-property/sync', [InternalPropertyController::class, 'sync'])->name('internal-property.sync');
     Route::post('/api/internal-property/process-sold-links', [InternalPropertyController::class, 'processSoldLinks'])->name('internal-property.process-sold-links');
+    Route::post('/api/internal-property/fetch-missing-sold-images', [InternalPropertyController::class, 'fetchMissingSoldImages'])->name('internal-property.fetch-missing-sold-images');
 });
 
 // Saved Search routes (require authentication)
