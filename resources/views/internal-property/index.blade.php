@@ -1514,7 +1514,90 @@
             content: '⏱ ';
         }
 
-        /* Responsive */
+        .sold-sidebar-header {
+            padding: 0.8rem 1rem;
+            border-bottom: 1px solid var(--card-border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            background: #f8f9fa;
+        }
+
+        .sold-sidebar-left {
+            display: flex;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        .sold-sidebar-title, .sold-sidebar-title-link {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: var(--text-main);
+            white-space: nowrap;
+        }
+
+        .sold-sidebar-title-link {
+            color: var(--primary);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .sold-sidebar-title-link:hover {
+            color: var(--secondary);
+        }
+
+        /* Sold Property Import Button (Header version) */
+        .sold-header-import-btn {
+            background: white;
+            color: var(--primary);
+            border: 1px solid var(--primary);
+            padding: 0.25rem 0.6rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            flex-shrink: 0;
+        }
+
+        .sold-header-import-btn:hover {
+            background: var(--primary);
+            color: white;
+        }
+
+        .sold-header-import-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            background: #eee;
+            border-color: #ccc;
+            color: #666;
+        }
+
+        .sold-header-import-btn .spinner-sm {
+            width: 10px;
+            height: 10px;
+            border: 2px solid currentColor;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            display: none;
+        }
+
+        .sold-header-import-btn.loading .spinner-sm {
+            display: inline-block;
+        }
+
+        .sold-header-import-btn.loading .btn-text {
+            display: none;
+        }
+
         @media (max-width: 768px) {
             .title {
                 font-size: 1.75rem;
@@ -1551,15 +1634,17 @@
                 @if(isset($search))
                     Properties in {{ str_replace('+', ' ', urldecode($search->area)) }}
                 @else
-                    Internal Properties
+                    All Imported Properties
                 @endif
             </h1>
+            @if(isset($search))
             <button class="sync-btn" id="syncBtn">
                 <svg class="sync-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
                 </svg>
                 Import Properties (Step: 01)
             </button>
+            @endif
         </div>
 
         @if(isset($search) && $search->updates_url)
@@ -1644,9 +1729,9 @@
 
         <!-- Empty State -->
         <div class="empty-state active" id="emptyState">
-            <div class="empty-icon">🏠</div>
-            <p class="empty-text">Click the "Import Properties" button to load property listings</p>
-            <p style="color: var(--text-secondary); font-size: 0.875rem;">This will fetch data from approximately 620 property URLs</p>
+            <div class="empty-icon">📂</div>
+            <p class="empty-text">No properties found in database</p>
+            <p style="color: var(--text-secondary); font-size: 0.875rem;">Import properties from a specific filter to see them here</p>
         </div>
 
         <!-- Properties Grid -->
@@ -1663,6 +1748,8 @@
         let propertyData = null;
         let propertyUrls = [];
         let loadedProperties = [];
+        let displayedProperties = [];  // Tracks current sort state for pagination
+        let currentSortType = 'default';  // Tracks current sort selection
         let currentPage = 1;
         const itemsPerPage = 10; // Show 10 properties per page
         
@@ -1695,9 +1782,11 @@
         window.searchContext = {!! json_encode($search ?? null) !!};
 
         // Import button handler
-        syncBtn.addEventListener('click', async () => {
-            await importAllProperties(true);
-        });
+        if (syncBtn) {
+            syncBtn.addEventListener('click', async () => {
+                await importAllProperties(true);
+            });
+        }
 
         // Load properties on startup
         document.addEventListener('DOMContentLoaded', async () => {
@@ -1728,6 +1817,7 @@
                 loadedCount.textContent = data.properties.length;
                 
                 loadedProperties = data.properties;
+                displayedProperties = [...loadedProperties];  // Initialize displayed properties
                 propertyUrls = data.properties.map(p => ({ url: p.url, id: p.id }));
                 
                 console.log(`✓ Loaded page 1: ${data.properties.length} properties`);
@@ -1735,7 +1825,7 @@
                 console.log(`Images in first property: ${data.properties[0]?.images?.length || 0}`);
                 console.log(`Sold data in first property: ${data.properties[0]?.sold_properties?.length || 0}`);
                 
-                displayProperties(loadedProperties);
+                displayProperties(displayedProperties);
                 loading.classList.remove('active');
                 showAlert('success', `Loaded ${data.properties.length} of ${data.total} properties`);
                 
@@ -1748,13 +1838,16 @@
                             loadedProperties = loadedProperties.concat(pageData.properties);
                             propertyUrls = propertyUrls.concat(pageData.properties.map(p => ({ url: p.url, id: p.id })));
                             
+                            // Update displayed properties with current sort
+                            sortProperties(currentSortType, false);  // Re-sort but don't reset page
+                            
                             // Update loaded count progressively
                             loadedCount.textContent = loadedProperties.length;
                             console.log(`✓ Loaded page ${page}: ${loadedProperties.length} / ${data.total} properties`);
                             
                             // Refresh display if on first page to show new items
                             if (currentPage === 1) {
-                                displayProperties(loadedProperties);
+                                displayProperties(displayedProperties);
                             }
                         }
                     }
@@ -2313,7 +2406,7 @@
             
             if (page >= 1 && page <= totalPages) {
                 currentPage = page;
-                displayProperties(loadedProperties);
+                displayProperties(displayedProperties);  // Use sorted array
                 document.getElementById('header')?.scrollIntoView({ behavior: 'smooth' });
             } else {
                 // Reset input to current page if invalid
@@ -2330,7 +2423,7 @@
 
             if (newPage >= 1 && newPage <= totalPages) {
                 currentPage = newPage;
-                displayProperties(loadedProperties);
+                displayProperties(displayedProperties);  // Use sorted array
                 document.getElementById('header')?.scrollIntoView({ behavior: 'smooth' });
             }
         }
@@ -2339,10 +2432,11 @@
         // Sorting Handlers
         function handleSortChange() {
             const sortType = document.getElementById('sortSelect').value;
-            sortProperties(sortType);
+            sortProperties(sortType, true);  // Reset to page 1 when user changes sort
         }
 
-        function sortProperties(type) {
+        function sortProperties(type, resetPage = true) {
+            currentSortType = type;  // Store current sort type
             let sorted = [...loadedProperties];
             
             switch(type) {
@@ -2359,21 +2453,77 @@
                     sorted.sort((a, b) => (parseFloat(b.average_sold_price) || 0) - (parseFloat(a.average_sold_price) || 0));
                     break;
                 case 'discount_high':
-                    // Sort by discount descending (Largest first)
-                    // Treat null/missing as -Infinity so they go to the bottom
+                    // Largest Discount sorting:
+                    // 1. Discounts (negative values) first, sorted by largest discount (most negative first)
+                    // 2. Then premiums (positive values), sorted from lowest to highest
+                    // 3. Nulls/undefined at the very bottom
                     sorted.sort((a, b) => {
-                        const valA = a.discount_metric !== null && a.discount_metric !== undefined ? parseFloat(a.discount_metric) : -999999;
-                        const valB = b.discount_metric !== null && b.discount_metric !== undefined ? parseFloat(b.discount_metric) : -999999;
-                        return valB - valA;
+                        const valA = a.discount_metric;
+                        const valB = b.discount_metric;
+                        
+                        // Handle nulls - push to bottom
+                        const aIsNull = valA === null || valA === undefined;
+                        const bIsNull = valB === null || valB === undefined;
+                        
+                        if (aIsNull && bIsNull) return 0;
+                        if (aIsNull) return 1;  // a goes to bottom
+                        if (bIsNull) return -1; // b goes to bottom
+                        
+                        const numA = parseFloat(valA);
+                        const numB = parseFloat(valB);
+                        
+                        // Both are discounts (negative) - largest discount first (more negative first)
+                        if (numA < 0 && numB < 0) {
+                            return numA - numB; // -30 comes before -10
+                        }
+                        
+                        // Both are premiums (positive) - lowest premium first
+                        if (numA >= 0 && numB >= 0) {
+                            return numA - numB; // 5 comes before 20
+                        }
+                        
+                        // One is discount, one is premium - discount comes first
+                        if (numA < 0 && numB >= 0) return -1; // discount first
+                        if (numA >= 0 && numB < 0) return 1;  // discount first
+                        
+                        return 0;
                     });
                     break;
                 case 'discount_low':
-                    // Sort by discount ascending (Smallest first)
-                    // Treat null/missing as Infinity so they go to the bottom
+                    // Smallest Discount / Largest Premium sorting:
+                    // 1. Premiums first (positive values), sorted from highest to lowest
+                    // 2. Then discounts (negative values), sorted from smallest to largest
+                    // 3. Nulls/undefined at the very bottom
                     sorted.sort((a, b) => {
-                        const valA = a.discount_metric !== null && a.discount_metric !== undefined ? parseFloat(a.discount_metric) : 999999;
-                        const valB = b.discount_metric !== null && b.discount_metric !== undefined ? parseFloat(b.discount_metric) : 999999;
-                        return valA - valB;
+                        const valA = a.discount_metric;
+                        const valB = b.discount_metric;
+                        
+                        // Handle nulls - push to bottom
+                        const aIsNull = valA === null || valA === undefined;
+                        const bIsNull = valB === null || valB === undefined;
+                        
+                        if (aIsNull && bIsNull) return 0;
+                        if (aIsNull) return 1;  // a goes to bottom
+                        if (bIsNull) return -1; // b goes to bottom
+                        
+                        const numA = parseFloat(valA);
+                        const numB = parseFloat(valB);
+                        
+                        // Both are premiums (positive) - largest premium first
+                        if (numA >= 0 && numB >= 0) {
+                            return numB - numA; // 20 comes before 5
+                        }
+                        
+                        // Both are discounts (negative) - smallest discount first (less negative first)
+                        if (numA < 0 && numB < 0) {
+                            return numB - numA; // -10 comes before -30
+                        }
+                        
+                        // One is discount, one is premium - premium comes first
+                        if (numA >= 0 && numB < 0) return -1; // premium first
+                        if (numA < 0 && numB >= 0) return 1;  // premium first
+                        
+                        return 0;
                     });
                     break;
                 case 'road_asc':
@@ -2388,8 +2538,12 @@
                     break;
             }
             
-            currentPage = 1;
-            displayProperties(sorted);
+            displayedProperties = sorted;  // Store sorted array for pagination
+            
+            if (resetPage) {
+                currentPage = 1;
+            }
+            displayProperties(displayedProperties);
         }
 
         function parseNumericPrice(priceStr) {
@@ -2440,8 +2594,8 @@
                         
                         <div class="property-info-section">
                             ${property.discount_metric !== null && property.discount_metric !== undefined ? `
-                                <div class="discount-badge" style="${property.discount_metric < 0 ? 'background: var(--error);' : ''}">
-                                    ${Math.abs(property.discount_metric)}% ${property.discount_metric < 0 ? 'Premium' : 'Discount'}
+                                <div class="discount-badge" style="${property.discount_metric > 0 ? 'background: var(--error);' : ''}">
+                                    ${Math.abs(Math.round(property.discount_metric))}% ${property.discount_metric > 0 ? 'Premium' : 'Discount'}
                                 </div>
                             ` : ''}
                             
@@ -2537,24 +2691,31 @@
                     <!-- RIGHT SIDE: Sold History Sidebar -->
                     <div class="property-sold-sidebar">
                         <div class="sold-sidebar-header">
+                            <div class="sold-sidebar-left">
+                                ${property.sold_link ? `
+                                    <a href="${property.sold_link}" target="_blank" class="sold-sidebar-title-link" onclick="event.stopPropagation()">
+                                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                        </svg>
+                                        Sold History (${property.sold_properties ? property.sold_properties.length : 0})
+                                    </a>
+                                ` : `
+                                    <div class="sold-sidebar-title">
+                                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                        </svg>
+                                        Sold History (${property.sold_properties ? property.sold_properties.length : 0})
+                                    </div>
+                                `}
+                            </div>
+                            
                             ${property.sold_link ? `
-                                <a href="${property.sold_link}" target="_blank" class="sold-sidebar-title-link" onclick="event.stopPropagation()">
-                                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                    </svg>
-                                    Sold History (${property.sold_properties ? property.sold_properties.length : 0})
-                                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" class="link-arrow">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
-                                    </svg>
-                                </a>
-                            ` : `
-                                <div class="sold-sidebar-title">
-                                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                    </svg>
-                                    Sold History (${property.sold_properties ? property.sold_properties.length : 0})
-                                </div>
-                            `}
+                                <button class="sold-header-import-btn" id="header-import-${property.id}" 
+                                        onclick="importAllSoldHistory(event, '${property.id}')" title="Import Sold History">
+                                    <span class="spinner-sm"></span>
+                                    <span class="btn-text">Import</span>
+                                </button>
+                            ` : ''}
                         </div>
                         
                         <div class="sold-list-container">
@@ -2572,22 +2733,21 @@
                                                 <img src="${soldPhoto}" alt="Property" loading="lazy" onerror="this.src='https://via.placeholder.com/260x180/eee/999?text=No+Photo'">
                                             </div>
                                             <div class="sold-property-main">
-                                                <div class="sold-beds-baths">
-                                                    ${sold.bedrooms ? `<span class="sold-bed-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v11a2 2 0 002 2h14a2 2 0 002-2V7"/><path d="M21 7V5a2 2 0 00-2-2H5a2 2 0 00-2 2v2"/><path d="M3 11h18"/></svg> ${sold.bedrooms}</span>` : ''}
-                                                    ${sold.bathrooms ? `<span class="sold-bath-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h16a1 1 0 011 1v3a4 4 0 01-4 4H7a4 4 0 01-4-4v-3a1 1 0 011-1z"/><path d="M6 12V5a2 2 0 012-2h3v2.25"/></svg> ${sold.bathrooms}</span>` : ''}
-                                                </div>
                                                 <div class="sold-property-type">
                                                     ${sold.property_type || 'Property'} (${sold.tenure || 'Unknown'})
                                                 </div>
                                                 <div class="sold-property-location" title="${soldHouse ? soldHouse + ', ' : ''}${soldRoad}">
                                                     ${soldHouse ? soldHouse + ', ' : ''}${soldRoad}
                                                 </div>
-                                                
+                                                <div class="sold-beds-baths">
+                                                    ${sold.bedrooms ? `<span class="sold-bed-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v11a2 2 0 002 2h14a2 2 0 002-2V7"/><path d="M21 7V5a2 2 0 00-2-2H5a2 2 0 00-2 2v2"/><path d="M3 11h18"/></svg> ${sold.bedrooms}</span>` : ''}
+                                                    ${sold.bathrooms ? `<span class="sold-bath-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h16a1 1 0 011 1v3a4 4 0 01-4 4H7a4 4 0 01-4-4v-3a1 1 0 011-1z"/><path d="M6 12V5a2 2 0 012-2h3v2.25"/></svg> ${sold.bathrooms}</span>` : ''}
+                                                </div>
                                                 <div class="sold-property-transactions">
                                                     ${sold.prices && sold.prices.length > 0 ? 
                                                         sold.prices.slice(0, 3).map(price => `
                                                             <div class="sold-tx-row">
-                                                                <span class="sold-tx-date">${price.sold_date || '-'}</span>
+                                                                 <span class="sold-tx-date">${price.sold_date || '-'}</span>
                                                                 <span class="sold-tx-price">${price.sold_price || '-'}</span>
                                                             </div>
                                                         `).join('')
@@ -2785,6 +2945,68 @@
                 console.error('Error details:', error.message, error.stack);
                 // Show error for debugging
                 showAlert('error', `Sold data import failed: ${error.message}`);
+            }
+        }
+        
+        // Import ALL sold property history for a specific property
+        async function importAllSoldHistory(event, propertyId) {
+            event.preventDefault();
+            event.stopPropagation();
+            
+            const btn = document.getElementById(`header-import-${propertyId}`);
+            if (!btn || btn.disabled) return;
+            
+            // Show loading state
+            btn.classList.add('loading');
+            btn.disabled = true;
+            
+            try {
+                console.log(`📡 Importing all sold history for property ${propertyId}...`);
+                showAlert('success', 'Fetching complete sold history... this may take a moment.');
+                
+                const response = await fetch('/api/internal-property/process-sold-links', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                    },
+                    body: JSON.stringify({
+                        property_id: propertyId
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok || !data.success) {
+                    throw new Error(data.message || 'Failed to import sold history');
+                }
+                
+                console.log(`✅ Sold history imported for property ${propertyId}`, data);
+                showAlert('success', `Import complete! Processed ${data.sold_properties} sold records.`);
+                
+                // Update the property in the local loadedProperties array
+                if (data.property) {
+                    const propertyIndex = loadedProperties.findIndex(p => p.id == propertyId);
+                    if (propertyIndex !== -1) {
+                        loadedProperties[propertyIndex] = data.property;
+                        // Re-render the card
+                        updatePropertyCard(data.property);
+                    }
+                } else {
+                    // Fallback to reload if property not returned (though it should be)
+                    await loadFromDatabaseOnStartup();
+                }
+                
+            } catch (error) {
+                console.error(`❌ Error importing all sold history:`, error);
+                showAlert('error', `Import failed: ${error.message}`);
+            } finally {
+                // Reset button state
+                if (btn) {
+                    btn.classList.remove('loading');
+                    btn.disabled = false;
+                }
             }
         }
 

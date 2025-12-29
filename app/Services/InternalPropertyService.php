@@ -12,217 +12,23 @@ use Illuminate\Support\Facades\Cache;
 class InternalPropertyService
 {
     private $client;
-    private $maxConcurrent = 5;
+    private $maxConcurrent = 30; // Process 30 properties simultaneously for faster loading
     private $cacheEnabled = true;
-    private $cacheDuration = 3600;
+    private $cacheDuration = 3600; // 1 hour cache
 
     public function __construct()
     {
-        $this->client = $this->createFreshClient();
-    }
-
-    /**
-     * Create a fresh Guzzle client with new cookies and rotated User-Agent
-     * This prevents session blocking by the target website
-     */
-    private function createFreshClient()
-    {
-        return new Client([
+        $this->client = new Client([
             'verify' => false,
             'timeout' => 30,
             'connect_timeout' => 15,
             'headers' => [
-                'User-Agent' => $this->getRandomUserAgent(),
-                'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                'Accept-Language' => 'en-US,en;q=0.9',
+                'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language' => 'en-GB,en;q=0.9',
                 'Cache-Control' => 'no-cache',
-                'Pragma' => 'no-cache',
-                'Sec-Ch-Ua' => '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                'Sec-Ch-Ua-Mobile' => '?0',
-                'Sec-Ch-Ua-Platform' => '"Windows"',
-                'Sec-Fetch-Dest' => 'document',
-                'Sec-Fetch-Mode' => 'navigate',
-                'Sec-Fetch-Site' => 'none',
-                'Sec-Fetch-User' => '?1',
-                'Upgrade-Insecure-Requests' => '1',
-            ],
-            'cookies' => true,
+            ]
         ]);
-    }
-
-    /**
-     * Fetch images for a sold property from its detail URL page
-     * 
-     * @param string $detailUrl The sold property detail URL (e.g., house-prices detail page)
-     * @return array Array of image URLs
-     */
-    /**
-     * Fetch full details for a sold property from its detail URL page
-     * 
-     * @param string $detailUrl The sold property detail URL
-     * @return array Array containing images and details
-     */
-    public function fetchSoldPropertyDetails($detailUrl)
-    {
-        $result = [
-            'images' => [],
-            'bedrooms' => null,
-            'bathrooms' => null,
-            'property_type' => null,
-            'tenure' => null,
-            'transactions' => [],
-            'success' => false
-        ];
-
-        if (empty($detailUrl)) {
-            return $result;
-        }
-        
-        try {
-            Log::info("Fetching sold property details from: {$detailUrl}");
-            
-            $response = $this->client->request('GET', $detailUrl);
-            $html = $response->getBody()->getContents();
-            
-            $images = [];
-            $foundData = false;
-            
-            // 1. Try generic JSON extraction (PAGE_MODEL, __NEXT_DATA__)
-            $jsonData = $this->parseJsonData($html);
-            
-            // Helper closure to recursive search
-            $findKey = function($arr, $target) use (&$findKey) {
-                if (!is_array($arr)) return null;
-                if (isset($arr[$target])) return $arr[$target];
-                foreach ($arr as $k => $v) {
-                    if (is_array($v)) {
-                        $res = $findKey($v, $target);
-                        if ($res) return $res;
-                    }
-                }
-                return null;
-            };
-            
-            // 2. Try React Router Context (new Rightmove format)
-            if (!$jsonData && preg_match_all('/enqueue\((.*?)\);/s', $html, $matches)) {
-                // Iterate through all enqueued data chunks
-                foreach ($matches[1] as $jsonStr) {
-                    $chunk = json_decode($jsonStr, true);
-                    if ($chunk) {
-                        // Merge or search within chunk
-                        if (isset($chunk['bedrooms']) || isset($chunk['transactions'])) {
-                            $jsonData = $chunk;
-                            break; // Found the relevant chunk
-                        }
-                        // recursive search in chunk
-                        if ($findKey($chunk, 'bedrooms') || $findKey($chunk, 'transactions')) {
-                            $jsonData = $chunk;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if ($jsonData) {
-                $foundData = true;
-                
-                // EXTRACT IMAGES
-                $possiblePaths = [
-                    ['propertyData', 'images'],
-                    ['property', 'images'],
-                    ['images'],
-                    ['propertyPhotos'],
-                    ['photos'],
-                ];
-                
-                // Also search recursively for 'images' if not found in top paths
-                $imgData = null;
-                foreach ($possiblePaths as $path) {
-                    $data = $jsonData;
-                    $valid = true;
-                    foreach ($path as $key) {
-                        if (isset($data[$key])) $data = $data[$key];
-                        else { $valid = false; break; }
-                    }
-                    if ($valid) { $imgData = $data; break; }
-                }
-                
-                if (!$imgData) $imgData = $findKey($jsonData, 'images');
-
-                if ($imgData && is_array($imgData)) {
-                    foreach ($imgData as $img) {
-                        if (is_string($img)) $images[] = $img;
-                        elseif (isset($img['srcUrl'])) $images[] = $img['srcUrl'];
-                        elseif (isset($img['url'])) $images[] = $img['url'];
-                        elseif (isset($img['mediumImageUrl'])) $images[] = $img['mediumImageUrl'];
-                    }
-                }
-
-                // EXTRACT DETAILS
-                $result['bedrooms'] = $findKey($jsonData, 'bedrooms');
-                $result['bathrooms'] = $findKey($jsonData, 'bathrooms');
-                $result['tenure'] = $findKey($jsonData, 'tenure');
-                
-                // Type might be propertyType or propertySubType
-                $result['property_type'] = $findKey($jsonData, 'propertySubType') ?? $findKey($jsonData, 'propertyType');
-
-                // Transactions
-                $transactions = $findKey($jsonData, 'transactions'); // New key found by subagent
-                if (!$transactions) $transactions = $findKey($jsonData, 'soldPriceHistory'); // Old key
-
-                if ($transactions && is_array($transactions)) {
-                    foreach ($transactions as $trans) {
-                        $result['transactions'][] = [
-                            'price' => $trans['displayPrice'] ?? $trans['price'] ?? null, // Prefer displayPrice (£)
-                            'date' => $trans['displayDeedDate'] ?? $trans['deedDate'] ?? $trans['date'] ?? null
-                        ];
-                    }
-                }
-            }
-            
-            // 3. Fallback Regex (If JSON failed completely)
-            if (empty($result['bedrooms'])) {
-                if (preg_match('/"bedrooms"\s*[:=,]\s*(\d+)/i', $html, $matches)) $result['bedrooms'] = $matches[1];
-            }
-            if (empty($result['bathrooms'])) {
-                if (preg_match('/"bathrooms"\s*[:=,]\s*(\d+)/i', $html, $matches)) $result['bathrooms'] = $matches[1];
-            }
-            if (empty($result['transactions'])) {
-                // Try to find a raw transactions array block
-                 if (preg_match('/"transactions"\s*[:=,]\s*(\[\s*\{.*?\}\s*\])/s', $html, $matches)) {
-                    $transRaw = json_decode($matches[1], true);
-                    if ($transRaw) {
-                        foreach ($transRaw as $trans) {
-                            $result['transactions'][] = [
-                                'price' => $trans['displayPrice'] ?? $trans['price'] ?? null,
-                                'date' => $trans['displayDeedDate'] ?? $trans['deedDate'] ?? null
-                            ];
-                        }
-                    }
-                }
-            }
-
-            // Image Fallback (DOM)
-            if (empty($images)) {
-                $crawler = new \Symfony\Component\DomCrawler\Crawler($html);
-                $crawler->filter('.gallery img, .photos img, [data-test="property-img"] img')->each(function ($node) use (&$images) {
-                    $src = $node->attr('src') ?: $node->attr('data-src');
-                    if ($src && strpos($src, 'placeholder') === false) {
-                        $images[] = $src;
-                    }
-                });
-            }
-            
-            $result['images'] = array_slice($images, 0, 10);
-            $result['success'] = true;
-            Log::info("Fetched sold details: " . count($images) . " images, " . ($result['bedrooms'] ?? '?') . " beds, " . count($result['transactions']) . " transactions");
-            
-            return $result;
-            
-        } catch (\Exception $e) {
-            Log::warning("Failed to fetch sold property details from {$detailUrl}: " . $e->getMessage());
-            return $result;
-        }
     }
 
     /**
@@ -242,10 +48,6 @@ class InternalPropertyService
         Log::info("Processing " . count($urls) . " properties in " . count($chunks) . " chunks of {$this->maxConcurrent}");
         
         foreach ($chunks as $chunkIndex => $chunk) {
-            // Create fresh client for each chunk to avoid session blocking
-            $this->client = $this->createFreshClient();
-            Log::info("Chunk {$chunkIndex}: Created fresh client with new cookies");
-            
             $promises = [];
             
             // Create promises for this chunk
@@ -372,51 +174,19 @@ class InternalPropertyService
                                 Cache::put('property_' . md5($data['url']), $propertyData, $this->cacheDuration);
                             }
                         } else {
-                            Log::warning("Failed to parse property data for {$data['url']}: " . ($propertyData['error'] ?? 'Unknown error'));
-                            // FALLBACK: Return basic data so frontend clears "Loading..." state
-                            $properties[] = [
-                                'success' => true, // Mark as success so it returns to frontend
-                                'id' => $data['urlData']['id'] ?? null,
-                                'url' => $data['url'],
-                                'url_key' => $data['urlKey'],
-                                'original_data' => $data['urlData'],
-                                'address' => 'Error loading details',
-                                'price' => 'Check link',
-                                'images' => [],
-                                'sold_properties' => [],
-                                'description' => 'Failed to parse property details. Please click link to view.',
-                                'loading' => false // Important: Stop loading spinner
-                            ];
-                            $processed++; // Treat as processed so UI updates
+                            $failed++;
                         }
                     } else {
-                        // Request failed completely (e.g. 404, 403, 500)
-                        Log::error("Request failed for {$data['url']}");
-                        // Return error object to frontend to clear loading state
-                         $properties[] = [
-                                'success' => true,
-                                'id' => $data['urlData']['id'] ?? null,
-                                'url' => $data['url'],
-                                'url_key' => $data['urlKey'],
-                                'original_data' => $data['urlData'],
-                                'address' => 'Request Failed',
-                                'price' => 'Error',
-                                'images' => [],
-                                'sold_properties' => [],
-                                'description' => 'Request timeout or blocked.',
-                                'loading' => false
-                        ];
-                        $processed++;
+                        $failed++;
                     }
                 } else {
                     $failed++;
                 }
             }
             
-            // Random delay between chunks to be respectful and mimic human behavior (Jitter)
+            // Small delay between chunks to be respectful
             if ($chunkIndex < count($chunks) - 1) {
-                $delay = rand(1500000, 4000000); // 1.5 to 4 seconds
-                usleep($delay); 
+                usleep(100000); // 0.1 second delay - reduced for faster processing
             }
         }
         
@@ -444,14 +214,6 @@ class InternalPropertyService
                 return ['success' => false, 'error' => 'Unable to extract property data'];
             }
             
-            // DEBUG: Log the keys to see what we have
-            Log::info("JSON Data Keys for {$propertyUrl}: " . implode(', ', array_keys($jsonData)));
-            if (isset($jsonData['propertyData'])) {
-                Log::info("propertyData Keys: " . implode(', ', array_keys($jsonData['propertyData'])));
-            } else {
-                Log::warning("No propertyData key found in JSON!");
-            }
-            
             // Extract all the property information
             $images = $this->extractImages($jsonData);
             $details = $this->extractPropertyDetails($jsonData);
@@ -470,8 +232,6 @@ class InternalPropertyService
                 'title' => $details['title'],
                 'price' => $details['price'],
                 'address' => $details['address'],
-                'house_number' => $details['house_number'] ?? '',  // NEW: Pass house number
-                'road_name' => $details['road_name'] ?? '',        // NEW: Pass road name
                 'property_type' => $details['property_type'],
                 'bedrooms' => $details['bedrooms'],
                 'bathrooms' => $details['bathrooms'],
@@ -534,17 +294,9 @@ class InternalPropertyService
     {
         try {
             // Method 1: Look for window.PAGE_MODEL (NEW Rightmove format as of Dec 2024)
-            // Use recursive pattern to handle nested objects correctly
-            // Updated regex to be more robust with whitespace and potential variable declarations
-            if (preg_match('/(?:window\.|const\s+)PAGE_MODEL\s*=\s*(\{(?:[^{}]++|(?1))*\})/s', $html, $matches)) {
-                Log::info("Found PAGE_MODEL");
-                $data = json_decode($matches[1], true);
-                if ($data === null) {
-                    Log::error("JSON Decode Error: " . json_last_error_msg());
-                    Log::error("Bad JSON Start: " . substr($matches[1], 0, 100));
-                    Log::error("Bad JSON End: " . substr($matches[1], -100));
-                }
-                return $data;
+            if (preg_match('/window\.PAGE_MODEL\s*=\s*({.*?});?\s*$/m', $html, $matches)) {
+                Log::info("Found window.PAGE_MODEL");
+                return json_decode($matches[1], true);
             }
             
             // Method 2: Fallback - Look for script tag with id="__NEXT_DATA__" (old format)
@@ -558,7 +310,7 @@ class InternalPropertyService
             }
             
             // Method 3: Look for window.__NEXT_DATA__ pattern (old format)
-            if (preg_match('/window\.__NEXT_DATA__\s*=\s*(\{(?:[^{}]++|(?1))*\})/s', $html, $matches)) {
+            if (preg_match('/window\.__NEXT_DATA__\s*=\s*({.*?});/s', $html, $matches)) {
                 Log::info("Found window.__NEXT_DATA__");
                 return json_decode($matches[1], true);
             }
@@ -762,14 +514,7 @@ class InternalPropertyService
                 } else {
                     $details['sold_link'] = 'https://www.rightmove.co.uk' . $soldUrl;
                 }
-                
-                // Fix specific issue: If URL is just "/house-prices/.html", it's invalid
-                if (strpos($details['sold_link'], '/house-prices/.html') !== false) {
-                    Log::warning("Invalid sold link constructed: " . $details['sold_link']);
-                    $details['sold_link'] = null;
-                } else {
-                    Log::info("Found sold link: " . $details['sold_link']);
-                }
+                Log::info("Found sold link: " . $details['sold_link']);
             } else {
                 Log::warning("No sold link could be determined for property");
             }
@@ -823,7 +568,7 @@ class InternalPropertyService
             Log::info("Scraping sold properties from: {$url}");
             
             $allSoldProperties = [];
-            $maxPages = 1; // Reduced to 1 to prevent timeout. We only need recent sales.
+            $maxPages = 10; // Scrape up to 10 pages (should be enough for most properties)
             
             // Paginate through all pages using pageNumber parameter
             for ($currentPage = 1; $currentPage <= $maxPages; $currentPage++) {
@@ -948,29 +693,14 @@ class InternalPropertyService
                             'house_number' => '',
                             'road_name' => '',
                              'property_type' => $result['propertyType'] ?? $result['propertySubType'] ?? '',
-                             'bedrooms' => $result['bedrooms'] ?? $result['noOfBedrooms'] ?? $result['numberOfBedrooms'] ?? null,
-                             'bathrooms' => $result['bathrooms'] ?? $result['noOfBathrooms'] ?? $result['numberOfBathrooms'] ?? null,
+                             'bedrooms' => $result['bedrooms'] ?? null,
+                             'bathrooms' => $result['bathrooms'] ?? null,
                              'tenure' => $tenure,
                             'image_url' => $result['imageInfo']['mediumImageUrl'] ?? $result['imageInfo']['imageUrl'] ?? null,
-                            'images' => [], // Initialize images array
                             'map_url' => $result['staticMapUrls']['staticMapImgUrlDesktop'] ?? null,
                             'detail_url' => $detailUrl,
                              'transactions' => []
                          ];
-                         
-                         // Populate images array
-                         if (isset($result['imageInfo']['images']) && is_array($result['imageInfo']['images'])) {
-                             foreach ($result['imageInfo']['images'] as $img) {
-                                 if (isset($img['url'])) {
-                                     $soldProp['images'][] = $img['url'];
-                                 }
-                             }
-                         }
-                         
-                         // Fallback: If no images array but we have a main image, put it in the list
-                         if (empty($soldProp['images']) && $soldProp['image_url']) {
-                             $soldProp['images'][] = $soldProp['image_url'];
-                         }
 
                         // Parse sold property address
                         $parsedSoldAddr = $this->parseAddress($soldProp['location']);
@@ -1073,20 +803,5 @@ class InternalPropertyService
             'house_number' => trim($houseNumber),
             'road_name' => trim($roadName)
         ];
-    }
-    private function getRandomUserAgent()
-    {
-        $userAgents = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0',
-            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:121.0) Gecko/20100101 Firefox/121.0',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 OPR/106.0.0.0'
-        ];
-        
-        return $userAgents[array_rand($userAgents)];
     }
 }

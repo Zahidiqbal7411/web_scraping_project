@@ -172,21 +172,23 @@ class InternalPropertyController extends Controller
             // Format sold properties with their prices for JavaScript consumption
             // Also deduplicate by location to prevent same property showing multiple times
             $soldProperties = [];
-            $totalSalesInPeriod = 0;
-            $salesCountInPeriod = 0;
             $avgSoldPrice = 0;
             $discountMetric = null;
+            $salesCountInPeriod = 0;
             
             if ($prop->soldProperties && $prop->soldProperties->count() > 0) {
                 Log::info("Property {$prop->id} has {$prop->soldProperties->count()} sold properties via relationship");
                 
                 // Group by location to find the unique properties
                 $uniqueLatestSalesInPeriod = [];
+                $uniqueLatestSalesSameType = []; // Specifically for same-type benchmarking
+                
+                $subjectType = strtolower($prop->property_type ?? '');
                 
                 $soldProperties = $prop->soldProperties
                     ->unique('location')  // Deduplicate by location for the list
                     ->values()
-                    ->map(function($sold) use (&$uniqueLatestSalesInPeriod) {
+                    ->map(function($sold) use (&$uniqueLatestSalesInPeriod, &$uniqueLatestSalesSameType, $subjectType) {
                     $latestSaleInPeriod = null;
                     $latestTimestamp = 0;
                     
@@ -198,8 +200,12 @@ class InternalPropertyController extends Controller
                             if ($year >= 2020 && $year <= 2025) {
                                 if ($timestamp > $latestTimestamp) {
                                     $latestTimestamp = $timestamp;
-                                    $numericPrice = floatval(preg_replace('/[^\d.]/', '', $price->sold_price));
-                                    $latestSaleInPeriod = $numericPrice;
+                                    // Extract numeric value robustly
+                                    $priceStr = str_replace(',', '', $price->sold_price);
+                                    if (preg_match('/(\d+(?:\.\d+)?)/', $priceStr, $matches)) {
+                                        $numericPrice = floatval($matches[1]);
+                                        $latestSaleInPeriod = $numericPrice;
+                                    }
                                 }
                             }
                         }
@@ -212,6 +218,12 @@ class InternalPropertyController extends Controller
                     
                     if ($latestSaleInPeriod) {
                         $uniqueLatestSalesInPeriod[] = $latestSaleInPeriod;
+                        
+                        // Check if types match (fuzzy match for Semi-Detached etc)
+                        $soldType = strtolower($sold->property_type ?? '');
+                        if ($subjectType && $soldType && (str_contains($soldType, $subjectType) || str_contains($subjectType, $soldType))) {
+                             $uniqueLatestSalesSameType[] = $latestSaleInPeriod;
+                        }
                     }
                     
                     return [
@@ -221,27 +233,35 @@ class InternalPropertyController extends Controller
                         'house_number' => $sold->house_number,
                         'road_name' => $sold->road_name,
                         'image_url' => $sold->image_url,
-                        'images' => $sold->images, // Include the full images array
                         'map_url' => $sold->map_url,
                         'property_type' => $sold->property_type,
                         'bedrooms' => $sold->bedrooms,
                         'bathrooms' => $sold->bathrooms,
                         'tenure' => $sold->tenure,
                         'detail_url' => $sold->detail_url,
-                        'transactions' => $prices
+                        'prices' => $prices
                     ];
                 })->toArray();
                 
-                if (count($uniqueLatestSalesInPeriod) > 0) {
-                    $avgSoldPrice = round(array_sum($uniqueLatestSalesInPeriod) / count($uniqueLatestSalesInPeriod));
-                    $salesCountInPeriod = count($uniqueLatestSalesInPeriod);
+                // Use same-type average if available (much more accurate), otherwise area average
+                $benchmarkSales = count($uniqueLatestSalesSameType) > 0 ? $uniqueLatestSalesSameType : $uniqueLatestSalesInPeriod;
+                
+                if (count($benchmarkSales) > 0) {
+                    $avgSoldPrice = round(array_sum($benchmarkSales) / count($benchmarkSales));
+                    $salesCountInPeriod = count($benchmarkSales);
                     
-                    // Parse advertised price
+                    // Parse advertised price - handle "Offers over", "Guide price", etc.
                     $advertisedPriceStr = $prop->price ?? '';
-                    $advertisedPrice = floatval(preg_replace('/[^\d.]/', '', $advertisedPriceStr));
+                    $advertisedPrice = 0;
+                    if (preg_match('/([\d,]+(?:\.\d+)?)/', $advertisedPriceStr, $matches)) {
+                        $advertisedPrice = floatval(str_replace(',', '', $matches[1]));
+                    }
                     
                     if ($advertisedPrice > 0 && $avgSoldPrice > 0) {
-                        $discountMetric = (($avgSoldPrice - $advertisedPrice) / $avgSoldPrice) * 100;
+                        // Intuitive logic: (Advertised - Average) / Average
+                        // Positive result = Premium (priced above average)
+                        // Negative result = Discount (priced below average)
+                        $discountMetric = (($advertisedPrice - $avgSoldPrice) / $avgSoldPrice) * 100;
                     }
                 }
             } else {
@@ -251,18 +271,11 @@ class InternalPropertyController extends Controller
             
             // Extract house number and road name
             $address = $prop->location ?? 'Unknown location';
-            
-            // Use stored values if available, otherwise attempt fallbacks
-            $houseNumber = $prop->house_number;
-            $roadName = $prop->road_name;
-            
-            // If stored values are empty, try to parse from location
-            if (empty($houseNumber) && empty($roadName)) {
-                $roadName = $address;
-                if (preg_match('/^(\d+[A-Za-z]?),\s*(.*)$/', $address, $matches)) {
-                    $houseNumber = $matches[1];
-                    $roadName = $matches[2];
-                }
+            $houseNumber = '';
+            $roadName = $address;
+            if (preg_match('/^(\d+[A-Za-z]?),\s*(.*)$/', $address, $matches)) {
+                $houseNumber = $matches[1];
+                $roadName = $matches[2];
             }
 
             return [
@@ -458,52 +471,38 @@ class InternalPropertyController extends Controller
                 Log::info("Found " . count($data['urls']) . " new URLs. Clearing old data...");
 
                 // CLEAR OLD DATA (never touch saved_searches table)
-                // If importing for a specific search, delete only that search's data
-                // If global import, delete all data
+                // We now replace ONLY the data for the specific filter ID being imported
+                // to avoid erasing the overall data from the database.
                 try {
-                        // GLOBAL DELETE: Remove all data (but NOT saved_searches)
-                        // The user wants old records replaced entirely and IDs starting from 1
-                        Log::info("Performing global delete and ID reset (all data)");
+                    Log::info("Performing scoped deletion for filter_id: " . ($searchId ?? 'NULL'));
+                    
+                    // 1. Delete URLs for this filter
+                    \App\Models\Url::where('filter_id', $searchId)->delete();
+                    
+                    // 2. Find properties for this filter to clean up related data
+                    $propertyIds = \App\Models\Property::where('filter_id', $searchId)->pluck('id');
+                    
+                    if ($propertyIds->isNotEmpty()) {
+                        Log::info("Found " . $propertyIds->count() . " properties to clear for filter_id: " . ($searchId ?? 'NULL'));
                         
-                        // Disable foreign key checks for clean truncation
-                        \DB::statement('SET FOREIGN_KEY_CHECKS=0;');
-                        
-                        try {
-                            // Truncate in order: child tables first, then parent tables
-                            \App\Models\PropertySoldPrice::truncate();
-                            \App\Models\PropertySold::truncate();
-                            \App\Models\PropertyImage::truncate();
-                            \App\Models\Url::truncate();
-                            \App\Models\Property::truncate();
-                            
-                            // Reset ALL auto-increment counters to 1 for a truly fresh start
-                            \DB::statement('ALTER TABLE properties_sold_prices AUTO_INCREMENT = 1');
-                            \DB::statement('ALTER TABLE properties_sold AUTO_INCREMENT = 1');
-                            \DB::statement('ALTER TABLE property_images AUTO_INCREMENT = 1');
-                            \DB::statement('ALTER TABLE urls AUTO_INCREMENT = 1');
-                            \DB::statement('ALTER TABLE properties AUTO_INCREMENT = 1');
-                            
-                            Log::info("Successfully truncated all data tables and reset auto-increment counters to 1");
-                        } catch (\Exception $truncateEx) {
-                            Log::error("Error during truncation: " . $truncateEx->getMessage());
-                            
-                            // Fallback to delete if truncate fails
-                            \App\Models\PropertySoldPrice::query()->delete();
-                            \App\Models\PropertySold::query()->delete();
-                            \App\Models\PropertyImage::query()->delete();
-                            \App\Models\Url::query()->delete();
-                            \App\Models\Property::query()->delete();
-                            Log::info("Fallback: Deleted all data instead of truncation");
+                        // 3. Delete Sold Prices (no direct cascade from Property to SoldPrice)
+                        $soldIds = \App\Models\PropertySold::whereIn('property_id', $propertyIds)->pluck('id');
+                        if ($soldIds->isNotEmpty()) {
+                            \App\Models\PropertySoldPrice::whereIn('sold_property_id', $soldIds)->delete();
+                            \App\Models\PropertySold::whereIn('id', $soldIds)->delete();
                         }
                         
-                        // Re-enable foreign key checks
-                        \DB::statement('SET FOREIGN_KEY_CHECKS=1;');
+                        // 4. Delete Images (should cascade but being explicit for safety)
+                        \App\Models\PropertyImage::whereIn('property_id', $propertyIds)->delete();
+                        
+                        // 5. Delete Properties
+                        \App\Models\Property::whereIn('id', $propertyIds)->delete();
+                    }
                     
-                    Log::info("Old data cleared successfully. Saving new data.");
+                    Log::info("Scoped deletion complete. Old data for this filter has been replaced.");
                     
                 } catch (\Exception $e) {
-                    \DB::statement('SET FOREIGN_KEY_CHECKS=1;');
-                    Log::error("Error clearing old data: " . $e->getMessage());
+                    Log::error("Error during scoped deletion: " . $e->getMessage());
                     Log::error("Stack trace: " . $e->getTraceAsString());
                     // Continue with import anyway
                 }
@@ -612,8 +611,6 @@ class InternalPropertyController extends Controller
             // SAVE FETCHED PROPERTIES TO DATABASE
             $savedCount = 0;
             if ($result['processed'] > 0 && !empty($result['properties'])) {
-                Log::info("DEBUG: First property data keys: " . implode(', ', array_keys($result['properties'][0])));
-                Log::info("DEBUG: First property ID value: " . ($result['properties'][0]['id'] ?? 'NULL'));
                 foreach ($result['properties'] as $propData) {
                     try {
                         // Extract ID from scraped data or URL
@@ -657,100 +654,77 @@ class InternalPropertyController extends Controller
                                     'lease_length' => $propData['lease_length'] ?? null
                                 ]
                             );
+                            
                             // SCRAPE & SAVE SOLD HISTORY DURING IMPORT
-                            // Skip if sold data already exists to reduce requests and speed up import
+                            // This makes import slower but shows sold data immediately
                             if (!empty($propData['sold_link'])) {
-                                $existingSoldCount = PropertySold::where('property_id', $propId)->count();
+                                Log::info("Found sold link for property {$propId}: " . $propData['sold_link']);
                                 
-                                if ($existingSoldCount > 0) {
-                                    Log::info("Skipping sold data scraping for property {$propId} - already has {$existingSoldCount} sold records");
-                                } else {
-                                    Log::info("Found sold link for property {$propId}: " . $propData['sold_link']);
-                                
-                                    try {
-                                        $soldData = $this->propertyService->scrapeSoldProperties($propData['sold_link'], $propId);
+                                try {
+                                    $soldData = $this->propertyService->scrapeSoldProperties($propData['sold_link'], $propId);
+                                    
+                                    if (!empty($soldData)) {
+                                        Log::info("Scraped " . count($soldData) . " sold properties for property {$propId}");
                                         
-                                        if (!empty($soldData)) {
-                                            Log::info("Scraped " . count($soldData) . " sold properties for property {$propId}");
+                                        \DB::beginTransaction();
+                                        try {
+                                            $savedSoldCount = 0;
+                                            $savedPriceCount = 0;
                                             
-                                            \DB::beginTransaction();
-                                            try {
-                                                $savedSoldCount = 0;
-                                                $savedPriceCount = 0;
+                                            foreach ($soldData as $soldProp) {
+                                                if (empty($soldProp['location'])) {
+                                                    Log::warning("Skipping sold property with no location");
+                                                    continue;
+                                                }
                                                 
-                                                foreach ($soldData as $soldProp) {
-                                                    if (empty($soldProp['location'])) {
-                                                        Log::warning("Skipping sold property with no location");
-                                                        continue;
-                                                    }
-                                                    
-                                                    $matchCriteria = [
-                                                        'property_id' => $propId,
-                                                        'location' => $soldProp['location']
-                                                    ];
+                                                $matchCriteria = [
+                                                    'property_id' => $propId,
+                                                    'location' => $soldProp['location']
+                                                ];
 
-                                                    $soldRecord = PropertySold::updateOrCreate(
-                                                        $matchCriteria,
-                                                        [
-                                                            'source_sold_link' => $propData['sold_link'],
-                                                            'house_number' => $soldProp['house_number'] ?? '',
-                                                            'road_name' => $soldProp['road_name'] ?? '',
-                                                            'property_type' => $soldProp['property_type'],
-                                                            'bedrooms' => $soldProp['bedrooms'],
-                                                            'bathrooms' => $soldProp['bathrooms'],
-                                                            'tenure' => $soldProp['tenure'],
-                                                            'image_url' => $soldProp['image_url'] ?? null,
-                                                            'map_url' => $soldProp['map_url'] ?? null,
-                                                            'detail_url' => $soldProp['detail_url'] ?? null
-                                                        ]
-                                                    );
-                                                    $savedSoldCount++;
+                                                $soldRecord = PropertySold::updateOrCreate(
+                                                    $matchCriteria,
+                                                    [
+                                                        'source_sold_link' => $propData['sold_link'],
+                                                        'property_type' => $soldProp['property_type'],
+                                                        'bedrooms' => $soldProp['bedrooms'],
+                                                        'bathrooms' => $soldProp['bathrooms'],
+                                                        'tenure' => $soldProp['tenure'],
+                                                        'image_url' => $soldProp['image_url'] ?? null,
+                                                        'map_url' => $soldProp['map_url'] ?? null,
+                                                        'detail_url' => $soldProp['detail_url'] ?? null
+                                                    ]
+                                                );
+                                                $savedSoldCount++;
+                                                
+                                                if (!empty($soldProp['transactions'])) {
+                                                    PropertySoldPrice::where('sold_property_id', $soldRecord->id)->delete();
                                                     
-                                                    // FETCH IMAGES FROM DETAIL URL - DISABLED FOR PERFORMANCE (Prevents timeouts)
-                                                    /*
-                                                    if (!empty($soldProp['detail_url']) && empty($soldRecord->images)) {
-                                                        try {
-                                                            $detailImages = $this->propertyService->fetchSoldPropertyImages($soldProp['detail_url']);
-                                                            if (!empty($detailImages)) {
-                                                                $soldRecord->images = $detailImages;
-                                                                $soldRecord->save();
-                                                                Log::info("Saved " . count($detailImages) . " images for sold property {$soldRecord->id}");
-                                                            }
-                                                        } catch (\Exception $imgEx) {
-                                                            Log::warning("Failed to fetch images for sold property: " . $imgEx->getMessage());
-                                                        }
-                                                    }
-                                                    */
-                                                    
-                                                    if (!empty($soldProp['transactions'])) {
-                                                        PropertySoldPrice::where('sold_property_id', $soldRecord->id)->delete();
-                                                        
-                                                        foreach ($soldProp['transactions'] as $trans) {
-                                                            if (!empty($trans['price']) || !empty($trans['date'])) {
-                                                                PropertySoldPrice::create([
-                                                                    'sold_property_id' => $soldRecord->id,
-                                                                    'sold_price' => $trans['price'],
-                                                                    'sold_date' => $trans['date']
-                                                                ]);
-                                                                $savedPriceCount++;
-                                                            }
+                                                    foreach ($soldProp['transactions'] as $trans) {
+                                                        if (!empty($trans['price']) || !empty($trans['date'])) {
+                                                            PropertySoldPrice::create([
+                                                                'sold_property_id' => $soldRecord->id,
+                                                                'sold_price' => $trans['price'],
+                                                                'sold_date' => $trans['date']
+                                                            ]);
+                                                            $savedPriceCount++;
                                                         }
                                                     }
                                                 }
-                                                
-                                                \DB::commit();
-                                                Log::info("Successfully saved {$savedSoldCount} sold properties with {$savedPriceCount} price records for property {$propId}");
-                                            } catch (\Exception $transEx) {
-                                                \DB::rollBack();
-                                                Log::error("Transaction failed for sold data on property {$propId}: " . $transEx->getMessage());
-                                                throw $transEx;
                                             }
-                                        } else {
-                                            Log::warning("No sold data returned from scrapeSoldProperties for property {$propId}. sold_link: " . $propData['sold_link']);
+                                            
+                                            \DB::commit();
+                                            Log::info("Successfully saved {$savedSoldCount} sold properties with {$savedPriceCount} price records for property {$propId}");
+                                        } catch (\Exception $transEx) {
+                                            \DB::rollBack();
+                                            Log::error("Transaction failed for sold data on property {$propId}: " . $transEx->getMessage());
+                                            throw $transEx;
                                         }
-                                    } catch (\Exception $soldEx) {
-                                        Log::error("Failed to scrape/save sold property data for {$propId}: " . $soldEx->getMessage());
+                                    } else {
+                                        Log::warning("No sold data returned from scrapeSoldProperties for property {$propId}. sold_link: " . $propData['sold_link']);
                                     }
+                                } catch (\Exception $soldEx) {
+                                    Log::error("Failed to scrape/save sold property data for {$propId}: " . $soldEx->getMessage());
                                 }
                             } else {
                                 Log::info("No sold link available for property {$propId}");
@@ -937,13 +911,16 @@ class InternalPropertyController extends Controller
         try {
             set_time_limit(600); // 10 minutes
             
-            $limit = $request->input('limit', null);
+            $limit = $request->input('limit', 10);
+            $propertyId = $request->input('property_id');
             
             // Get properties with sold_link
             $query = \App\Models\Property::whereNotNull('sold_link')
                 ->where('sold_link', '!=', '');
                 
-            if ($limit) {
+            if ($propertyId) {
+                $query->where('id', $propertyId);
+            } elseif ($limit) {
                 $query->limit((int)$limit);
             }
             
@@ -1010,65 +987,6 @@ class InternalPropertyController extends Controller
                             
                             $soldPropertiesCount++;
                             
-                            // FETCH IMAGES AND DETAILS FROM DETAIL URL
-                            // Check if we need to fetch details (missing images OR missing bedrooms)
-                            if (!empty($soldProp['detail_url']) && (empty($soldRecord->images) || empty($soldRecord->bedrooms))) {
-                                try {
-                                    $details = $this->propertyService->fetchSoldPropertyDetails($soldProp['detail_url']);
-                                    if ($details['success']) {
-                                        // Update images
-                                        if (empty($soldRecord->images) && !empty($details['images'])) {
-                                            $soldRecord->images = $details['images'];
-                                        }
-                                        
-                                        // Update details
-                                        $updated = false;
-                                        if (empty($soldRecord->bedrooms) && !empty($details['bedrooms'])) {
-                                            $soldRecord->bedrooms = $details['bedrooms'];
-                                            $updated = true;
-                                        }
-                                        if (empty($soldRecord->bathrooms) && !empty($details['bathrooms'])) {
-                                            $soldRecord->bathrooms = $details['bathrooms'];
-                                            $updated = true;
-                                        }
-                                        if (empty($soldRecord->property_type) && !empty($details['property_type'])) {
-                                            $soldRecord->property_type = $details['property_type'];
-                                            $updated = true;
-                                        }
-                                        if (empty($soldRecord->tenure) && !empty($details['tenure'])) {
-                                            $soldRecord->tenure = $details['tenure'];
-                                            $updated = true;
-                                        }
-                                        
-                                        if ($updated || !empty($details['images'])) {
-                                            $soldRecord->save();
-                                            Log::info("Enriched sold property {$soldRecord->id} details from URL");
-                                        }
-
-                                        // Update Transactions if available from detail page (usually better)
-                                        if (!empty($details['transactions'])) {
-                                            PropertySoldPrice::where('sold_property_id', $soldRecord->id)->delete();
-                                            foreach ($details['transactions'] as $trans) {
-                                                if (!empty($trans['price']) || !empty($trans['date'])) {
-                                                    PropertySoldPrice::create([
-                                                        'sold_property_id' => $soldRecord->id,
-                                                        'sold_price' => $trans['price'] ?? '',
-                                                        'sold_date' => $trans['date'] ?? ''
-                                                    ]);
-                                                }
-                                            }
-                                            // Empty instructions to prevent fallback logic from overwriting? 
-                                            // No, simply empty the soldProp transactions so the next block doesn't run?
-                                            // Actually, simply allow the next block to run IF we didn't get details? 
-                                            // Or better: clear $soldProp['transactions'] if we successfully saved from detail
-                                            $soldProp['transactions'] = []; 
-                                        }
-                                    }
-                                } catch (\Exception $imgEx) {
-                                    Log::warning("Failed to fetch details for sold property: " . $imgEx->getMessage());
-                                }
-                            }
-                            
                             // Save transaction history
                             if (!empty($soldProp['transactions'])) {
                                 // Clear old transactions
@@ -1083,6 +1001,28 @@ class InternalPropertyController extends Controller
                                         ]);
                                         $soldPricesCount++;
                                     }
+                                }
+                            }
+                            // Deep Scrape for missing details if this is a targeted import
+                            if ($propertyId && !empty($soldProp['detail_url']) && 
+                                (empty($soldRecord->bedrooms) || empty($soldRecord->bathrooms) || empty($soldRecord->image_url) || $soldRecord->image_url === 'https://via.placeholder.com/80x60/eee/999?text=No+Photo')) {
+                                
+                                Log::info("Deep scraping details for sold property: " . $soldRecord->location);
+                                try {
+                                    $deepData = $this->propertyService->fetchPropertyData($soldProp['detail_url']);
+                                    if ($deepData['success']) {
+                                        $soldRecord->update([
+                                            'bedrooms' => $deepData['bedrooms'] ?: $soldRecord->bedrooms,
+                                            'bathrooms' => $deepData['bathrooms'] ?: $soldRecord->bathrooms,
+                                            'tenure' => $deepData['tenure'] ?: $soldRecord->tenure,
+                                            'image_url' => (!empty($deepData['images']) ? $deepData['images'][0] : $soldRecord->image_url),
+                                        ]);
+                                    }
+                                    
+                                    // small pause between deep scratches
+                                    usleep(100000); // 0.1s
+                                } catch (\Exception $deepEx) {
+                                    Log::warning("Failed deep scrape for {$soldProp['detail_url']}: " . $deepEx->getMessage());
                                 }
                             }
                             
@@ -1105,7 +1045,7 @@ class InternalPropertyController extends Controller
             
             Log::info("Completed processing sold links. Processed: {$processedCount}, Sold: {$soldPropertiesCount}, Prices: {$soldPricesCount}");
             
-            return response()->json([
+            $responseData = [
                 'success' => true,
                 'message' => "Processed {$processedCount} properties with sold links",
                 'total_properties' => $totalProperties,
@@ -1113,7 +1053,16 @@ class InternalPropertyController extends Controller
                 'sold_properties' => $soldPropertiesCount,
                 'sold_prices' => $soldPricesCount,
                 'errors' => count($errors) > 0 ? $errors : null
-            ]);
+            ];
+
+            if ($propertyId) {
+                $updatedProperty = \App\Models\Property::with(['images', 'soldProperties.prices'])->find($propertyId);
+                if ($updatedProperty) {
+                    $responseData['property'] = $this->formatPropertiesForResponse(collect([$updatedProperty]))[0];
+                }
+            }
+
+            return response()->json($responseData);
             
         } catch (\Exception $e) {
             Log::error("Error processing sold links: " . $e->getMessage());
@@ -1121,114 +1070,6 @@ class InternalPropertyController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred while processing sold links',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Fetch images for sold properties that have detail_url but no images
-     * This uses the existing detail_url in database - no re-import needed
-     * 
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
-     */
-    public function fetchMissingSoldImages(Request $request)
-    {
-        try {
-            set_time_limit(600); // 10 minutes
-            
-            $limit = $request->input('limit', 100); // Default 100 to avoid timeout
-            
-            // Get sold properties with detail_url but no images
-            $soldProperties = PropertySold::whereNotNull('detail_url')
-                ->where('detail_url', '!=', '')
-                ->where(function($query) {
-                    $query->whereNull('images')
-                          ->orWhere('images', '[]')
-                          ->orWhere('images', '');
-                })
-                ->limit((int)$limit)
-                ->get();
-            
-            $total = $soldProperties->count();
-            
-            if ($total === 0) {
-                return response()->json([
-                    'success' => true,
-                    'message' => 'All sold properties already have images or no detail URLs available',
-                    'processed' => 0,
-                    'images_fetched' => 0
-                ]);
-            }
-            
-            Log::info("Fetching images for {$total} sold properties with missing images");
-            
-            $processed = 0;
-            $imagesFetched = 0;
-            $errors = [];
-            
-            foreach ($soldProperties as $soldProp) {
-                try {
-                    $details = $this->propertyService->fetchSoldPropertyDetails($soldProp->detail_url);
-                    
-                    if ($details['success']) {
-                        // Update images
-                        if (!empty($details['images'])) {
-                            $soldProp->images = $details['images'];
-                            $imagesFetched += count($details['images']);
-                        }
-                        
-                        // Update details
-                        if (!empty($details['bedrooms'])) $soldProp->bedrooms = $details['bedrooms'];
-                        if (!empty($details['bathrooms'])) $soldProp->bathrooms = $details['bathrooms'];
-                        if (!empty($details['tenure'])) $soldProp->tenure = $details['tenure'];
-                        
-                        $soldProp->save();
-
-                        // Update Transactions
-                        if (!empty($details['transactions'])) {
-                            PropertySoldPrice::where('sold_property_id', $soldProp->id)->delete();
-                            foreach ($details['transactions'] as $trans) {
-                                PropertySoldPrice::create([
-                                    'sold_property_id' => $soldProp->id,
-                                    'sold_price' => $trans['price'] ?? '',
-                                    'sold_date' => $trans['date'] ?? ''
-                                ]);
-                            }
-                        }
-                        
-                        Log::info("Fetched details for sold property {$soldProp->id}");
-                    }
-                    
-                    $processed++;
-                    
-                    // Small delay to be respectful
-                    usleep(100000); // 0.1 second
-                    
-                } catch (\Exception $e) {
-                    Log::warning("Failed to fetch details for sold property {$soldProp->id}: " . $e->getMessage());
-                    $errors[] = "Sold #{$soldProp->id}: " . $e->getMessage();
-                }
-            }
-            
-            Log::info("Completed fetching missing sold images. Processed: {$processed}, Images: {$imagesFetched}");
-            
-            return response()->json([
-                'success' => true,
-                'message' => "Fetched images for {$processed} sold properties",
-                'total' => $total,
-                'processed' => $processed,
-                'images_fetched' => $imagesFetched,
-                'errors' => count($errors) > 0 ? array_slice($errors, 0, 10) : null // Limit error array
-            ]);
-            
-        } catch (\Exception $e) {
-            Log::error("Error fetching missing sold images: " . $e->getMessage());
-            
-            return response()->json([
-                'success' => false,
-                'message' => 'An error occurred while fetching images',
                 'error' => $e->getMessage()
             ], 500);
         }
@@ -1302,71 +1143,6 @@ class InternalPropertyController extends Controller
                         $crawler = new \Symfony\Component\DomCrawler\Crawler($html);
                         $pagePropertiesCount = 0;
                         
-                        // Method 1: Try window.PAGE_MODEL (New Format)
-                        if (preg_match('/window\.PAGE_MODEL\s*=\s*({.*?});?\s*$/m', $html, $matches)) {
-                            $jsonData = json_decode($matches[1], true);
-                            $foundProperties = false;
-                            
-                            // Try multiple paths for properties in search results
-                            $paths = [
-                                ['searchResult', 'properties'],
-                                ['properties'],
-                                ['results'],
-                                ['props', 'pageProps', 'searchResults', 'properties']
-                            ];
-                            
-                            foreach ($paths as $path) {
-                                $data = $jsonData;
-                                $validPath = true;
-                                foreach ($path as $key) {
-                                    if (isset($data[$key])) {
-                                        $data = $data[$key];
-                                    } else {
-                                        $validPath = false;
-                                        break;
-                                    }
-                                }
-                                
-                                if ($validPath && is_array($data) && count($data) > 0) {
-                                    $propertiesData = $data;
-                                    $pagePropertiesCount = count($propertiesData);
-                                    
-                                    foreach ($propertiesData as $prop) {
-                                        try {
-                                            $propertyUrl = null;
-                                            $propertyId = $prop['id'] ?? null;
-                                            
-                                            // Extract URL - check multiple possible keys
-                                            if (isset($prop['propertyUrl'])) {
-                                                $propertyUrl = 'https://www.rightmove.co.uk' . $prop['propertyUrl'];
-                                            } elseif (isset($prop['url'])) {
-                                                $propertyUrl = 'https://www.rightmove.co.uk' . $prop['url'];
-                                            }
-                                            
-                                            if ($propertyUrl) {
-                                                $allUrls[] = [
-                                                    'id' => $propertyId,
-                                                    'url' => $propertyUrl,
-                                                    'title' => $prop['propertyTypeFullDescription'] ?? $prop['title'] ?? 'Property for sale',
-                                                    'price' => $prop['price']['displayPrices'][0]['displayPrice'] ?? $prop['price']['amount'] ?? 'Price on request',
-                                                    'address' => $prop['displayAddress'] ?? $prop['address'] ?? 'Address not available',
-                                                ];
-                                            }
-                                        } catch (\Exception $e) {
-                                            continue;
-                                        }
-                                    }
-                                    
-                                    Log::info("Page " . ($page + 1) . " processed via PAGE_MODEL keys " . implode('.', $path) . ". Found " . $pagePropertiesCount . " properties.");
-                                    $foundProperties = true;
-                                    break;
-                                }
-                            }
-                            
-                            if ($foundProperties) continue;
-                        }
-
-                        // Method 2: Try script#__NEXT_DATA__ (Old Format)
                         $nextDataScript = $crawler->filter('script#__NEXT_DATA__')->first();
                         
                         if ($nextDataScript->count() > 0) {
@@ -1397,10 +1173,10 @@ class InternalPropertyController extends Controller
                                     }
                                 }
                                 
-                                Log::info("Page " . ($page + 1) . " processed via __NEXT_DATA__. Found " . $pagePropertiesCount . " properties. Total so far: " . count($allUrls));
+                                Log::info("Page " . ($page + 1) . " processed. Found " . $pagePropertiesCount . " properties. Total so far: " . count($allUrls));
                             }
                         } else {
-                            // Method 3: Fallback regex for __NEXT_DATA__
+                            // Fallback method
                             $scripts = $crawler->filter('script')->each(function (\Symfony\Component\DomCrawler\Crawler $node) {
                                 return $node->html();
                             });
@@ -1521,6 +1297,54 @@ class InternalPropertyController extends Controller
                 'error' => $e->getMessage(),
                 'count' => 0
             ], 200);
+        }
+    }
+
+    public function importSoldPropertyDetails(Request $request)
+    {
+        try {
+            $request->validate([
+                'sold_property_id' => 'required|exists:properties_sold,id',
+                'detail_url' => 'required|url'
+            ]);
+
+            $soldPropertyId = $request->input('sold_property_id');
+            $detailUrl = $request->input('detail_url');
+
+            Log::info("Importing details for sold property ID: {$soldPropertyId} from: {$detailUrl}");
+
+            // Fetch data from source
+            $scrapedData = $this->propertyService->fetchPropertyData($detailUrl);
+
+            if (!$scrapedData['success']) {
+                throw new \Exception($scrapedData['error'] ?? 'Failed to fetch sold property details');
+            }
+
+            // Update the sold property record
+            $soldProperty = PropertySold::findOrFail($soldPropertyId);
+            $soldProperty->update([
+                'property_type' => $scrapedData['property_type'] ?? $soldProperty->property_type,
+                'bedrooms' => $scrapedData['bedrooms'] ?? $soldProperty->bedrooms,
+                'bathrooms' => $scrapedData['bathrooms'] ?? $soldProperty->bathrooms,
+                'tenure' => $scrapedData['tenure'] ?? $soldProperty->tenure,
+                'image_url' => (!empty($scrapedData['images']) ? $scrapedData['images'][0] : $soldProperty->image_url),
+            ]);
+
+            // Format transactions if available in scraped data
+            // (Note: Usually sold_link page has transactions, detail page might have them too)
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Sold property details imported successfully',
+                'sold_property' => $soldProperty->load('prices')
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error("Error importing sold property details: " . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 500);
         }
     }
 }
