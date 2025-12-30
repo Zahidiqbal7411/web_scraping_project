@@ -2,50 +2,41 @@
 
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\InternalPropertyController;
+use App\Http\Controllers\SavedSearchController;
 use Illuminate\Support\Facades\Route;
 
-// Public routes - redirect to dashboard (which requires login)
-Route::get('/', function () {
-    return redirect()->route('dashboard');
-});
-
-Route::get('/dashboard', function () {
-    return view('dashboard');
-})->middleware(['auth'])->name('dashboard');
-
-// Profile routes (still require authentication)
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
+
+    // Home Page - Property Listing
+    Route::get('/', [InternalPropertyController::class, 'index'])->name('dashboard');
+    Route::get('/internal-property', [InternalPropertyController::class, 'index'])->name('internal-property.index');
+    Route::get('/internal-property/{id}', [InternalPropertyController::class, 'show'])->name('internal-property.show');
+
+    // Internal Properties Routes
+    Route::prefix('internal-properties')->name('internal-properties.')->group(function () {
+        Route::get('/load', [InternalPropertyController::class, 'loadPropertiesFromDatabase'])->name('load');
+        Route::get('/fetch-urls', [InternalPropertyController::class, 'fetchUrls'])->name('fetch-urls');
+        Route::post('/sync', [InternalPropertyController::class, 'sync'])->name('sync');
+        Route::post('/process-sold', [InternalPropertyController::class, 'processSoldLinks'])->name('process-sold');
+        Route::get('/fetch-paginated', [InternalPropertyController::class, 'fetchUrlsPaginated'])->name('fetch-paginated');
+        Route::post('/fetch-all', [InternalPropertyController::class, 'fetchAllProperties'])->name('fetch-all');
+        Route::post('/import-sold-details', [InternalPropertyController::class, 'importSoldPropertyDetails'])->name('import-sold-details');
+        Route::get('/search/{id}', [InternalPropertyController::class, 'show'])->name('search');
+    });
+
+    // Saved Search / Filters Routes
+    Route::prefix('searchproperties')->name('searchproperties.')->group(function () {
+        Route::get('/', [SavedSearchController::class, 'showPage'])->name('index');
+        Route::get('/all', [SavedSearchController::class, 'index'])->name('all');
+        Route::post('/store', [SavedSearchController::class, 'store'])->name('store');
+        Route::delete('/{id}', [SavedSearchController::class, 'destroy'])->name('destroy');
+        Route::match(['post', 'put'], '/update/{id}', [SavedSearchController::class, 'update'])->name('update');
+        Route::get('/areas', [SavedSearchController::class, 'getAreas'])->name('getAreas');
+        Route::get('/check-area', [SavedSearchController::class, 'checkArea'])->name('check-area');
+    });
 });
 
-// Internal Property routes (require authentication)
-Route::middleware(['auth'])->group(function () {
-    Route::get('/internal-properties', [InternalPropertyController::class, 'index'])->name('internal-property.index');
-    Route::get('/internal-properties/search/{id}', [InternalPropertyController::class, 'show'])->name('internal-property.show');
-    Route::get('/api/internal-property/load-from-db', [InternalPropertyController::class, 'loadPropertiesFromDatabase'])->name('internal-property.load-from-db');
-    Route::get('/api/internal-property/fetch-urls', [InternalPropertyController::class, 'fetchUrls'])->name('internal-property.fetch-urls');
-    Route::get('/api/internal-property/fetch-urls-paginated', [InternalPropertyController::class, 'fetchUrlsPaginated'])->name('internal-property.fetch-urls-paginated');
-    Route::post('/api/internal-property/fetch-all', [InternalPropertyController::class, 'fetchAllProperties'])->name('internal-property.fetch-all');
-    Route::post('/api/internal-property/sync', [InternalPropertyController::class, 'sync'])->name('internal-property.sync');
-    Route::post('/api/internal-property/process-sold-links', [InternalPropertyController::class, 'processSoldLinks'])->name('internal-property.process-sold-links');
-    Route::post('/api/internal-property/import-sold-details', [InternalPropertyController::class, 'importSoldPropertyDetails'])->name('internal-property.import-sold-details');
-});
-
-// Saved Search routes (require authentication)
-Route::middleware(['auth'])->group(function () {
-    Route::get('/searchproperties', [App\Http\Controllers\SavedSearchController::class, 'showPage'])->name('searchproperties.index');
-    Route::get('/api/saved-searches', [App\Http\Controllers\SavedSearchController::class, 'index']);
-    Route::post('/api/saved-searches', [App\Http\Controllers\SavedSearchController::class, 'store']);
-    Route::put('/api/saved-searches/{id}', [App\Http\Controllers\SavedSearchController::class, 'update']);
-    Route::delete('/api/saved-searches/{id}', [App\Http\Controllers\SavedSearchController::class, 'destroy']);
-
-    // Area routes
-    Route::get('/api/areas', [App\Http\Controllers\SavedSearchController::class, 'getAreas']);
-    Route::post('/api/areas/check', [App\Http\Controllers\SavedSearchController::class, 'checkArea']);
-    Route::post('/api/areas/refresh', [App\Http\Controllers\SavedSearchController::class, 'refreshAreas']);
-});
-
-// Auth routes
-require __DIR__.'/auth.php';
+require __DIR__ . '/auth.php';

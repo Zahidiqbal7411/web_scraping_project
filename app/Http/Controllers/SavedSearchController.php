@@ -80,6 +80,14 @@ class SavedSearchController extends Controller
             $data['property_type'] = $queryParams['propertyTypes'];
         }
 
+        if (isset($queryParams['tenure'])) {
+            $data['tenure_types'] = $queryParams['tenure'];
+        }
+
+        if (isset($queryParams['maxDaysSinceAdded'])) {
+            $data['max_days_since_added'] = $queryParams['maxDaysSinceAdded'];
+        }
+
         // Parse new filters
         if (isset($queryParams['tenureTypes'])) {
             $data['tenure_types'] = $queryParams['tenureTypes'];
@@ -90,7 +98,7 @@ class SavedSearchController extends Controller
         }
 
         if (isset($queryParams['dontShow'])) {
-            $data['dont_show'] = $queryParams['dontShow'];
+            $data['dont_show'] = $queryParams['dont_show'] ?? $queryParams['dontShow'];
         }
 
         $search = SavedSearch::create($data);
@@ -167,6 +175,14 @@ class SavedSearchController extends Controller
             $search->property_type = $queryParams['propertyTypes'];
         }
 
+        if (isset($queryParams['tenure'])) {
+            $search->tenure_types = $queryParams['tenure'];
+        }
+
+        if (isset($queryParams['maxDaysSinceAdded'])) {
+            $search->max_days_since_added = $queryParams['maxDaysSinceAdded'];
+        }
+
         // Parse new filters
         if (isset($queryParams['tenureTypes'])) {
             $search->tenure_types = $queryParams['tenureTypes'];
@@ -177,7 +193,7 @@ class SavedSearchController extends Controller
         }
 
         if (isset($queryParams['dontShow'])) {
-            $search->dont_show = $queryParams['dontShow'];
+            $search->dont_show = $queryParams['dont_show'] ?? $queryParams['dontShow'];
         }
 
         $search->save();

@@ -19,5 +19,6 @@ class SavedSearch extends Model
         'must_have',
         'dont_show',
         'updates_url',
+        'max_days_since_added',
     ];
 }

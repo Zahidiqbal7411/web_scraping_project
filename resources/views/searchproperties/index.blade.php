@@ -1071,20 +1071,14 @@
             if (locationId) {
                 params.append('locationIdentifier', locationId);
             } else if (locationName) {
-                // If no ID found but user typed a name, try to use searchLocation
-                // IMPORTANT: Rightmove often fails with "Town, County" format.
-                // We typically need just "Town" for it to work or disambiguate.
                 const cleanLocationName = locationName.split(',')[0].trim();
                 params.append('searchLocation', cleanLocationName);
             }
 
-            // Radius
+            params.append('useLocationIdentifier', 'true');
             params.append('radius', '0.0');
-
-            // Sorting - most recent
             params.append('sortType', '2');
 
-            // Price
             if (minPriceSelect.value) {
                 params.append('minPrice', minPriceSelect.value);
             }
@@ -1092,7 +1086,6 @@
                 params.append('maxPrice', maxPriceSelect.value);
             }
 
-            // Bedrooms
             if (minBedroomsSelect.value) {
                 params.append('minBedrooms', minBedroomsSelect.value);
             }
@@ -1100,14 +1093,12 @@
                 params.append('maxBedrooms', maxBedroomsSelect.value);
             }
 
-            // Property Types - comma-separated
             const checkedTypes = document.querySelectorAll('input[name="propertyType"]:checked');
             if (checkedTypes.length > 0) {
                 const types = Array.from(checkedTypes).map(cb => cb.value).join(',');
                 params.append('propertyTypes', types);
             }
 
-            // Bathrooms
             const minBathroomsSelect = document.getElementById('minBathrooms');
             const maxBathroomsSelect = document.getElementById('maxBathrooms');
             if (minBathroomsSelect && minBathroomsSelect.value) {
@@ -1117,31 +1108,32 @@
                 params.append('maxBathrooms', maxBathroomsSelect.value);
             }
 
-            // Tenure Types - comma-separated
             const checkedTenures = document.querySelectorAll('input[name="tenureType"]:checked');
             if (checkedTenures.length > 0) {
                 const tenures = Array.from(checkedTenures).map(cb => cb.value).join(',');
                 params.append('tenure', tenures);
             }
 
-            // Include Under Offer / Sold STC
             const includeSSTC = document.getElementById('includeSSTC');
             if (includeSSTC && includeSSTC.checked) {
                 params.append('includeSSTC', 'true');
             }
 
-            // Must Have features - comma-separated
             const checkedMustHaves = document.querySelectorAll('input[name="mustHave"]:checked');
             if (checkedMustHaves.length > 0) {
                 const mustHaves = Array.from(checkedMustHaves).map(cb => cb.value).join(',');
                 params.append('mustHave', mustHaves);
             }
 
-            // Don't Show features - comma-separated
             const checkedDontShow = document.querySelectorAll('input[name="dontShow"]:checked');
             if (checkedDontShow.length > 0) {
                 const dontShows = Array.from(checkedDontShow).map(cb => cb.value).join(',');
                 params.append('dontShow', dontShows);
+            }
+
+            const maxDaysSinceAddedSelect = document.getElementById('maxDaysSinceAdded');
+            if (maxDaysSinceAddedSelect && maxDaysSinceAddedSelect.value) {
+                params.append('maxDaysSinceAdded', maxDaysSinceAddedSelect.value);
             }
 
             return `${baseUrl}?${params.toString()}`;
@@ -1173,7 +1165,7 @@
                     const cleanNameForLookup = locationName.split(',')[0].trim();
                     
                     try {
-                        const response = await fetch('/api/areas/check', {
+                        const response = await fetch('/searchproperties/check-area', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
@@ -1212,23 +1204,54 @@
 
         // Save/Update Search
         saveSearchBtn.addEventListener('click', async () => {
+            // Validate Area Input
+            const locationName = areaInput.value.trim();
+            if (!locationName) {
+                showAlert('error', 'Please enter an area name.');
+                areaInput.focus();
+                return;
+            }
+
             // Get URL from the editable input, or generate if empty
             let url = generatedUrlInput.value.trim();
             
-            // If no URL in the input, check if we can generate one
-            // If no URL in the input, check if we can generate one
-            // If no URL in the input, check if we can generate one
+            // Auto-generate URL if missing but area is present
             if (!url) {
-                if (!areaInput.value) {
-                     showAlert('error', 'Rightmove URL is mandatory. Please enter a URL or click "Generate URL".');
-                     return;
-                }
+                saveSearchBtn.disabled = true;
+                saveSearchBtn.innerHTML = '<span class="spinner"></span> Generating URL...';
                 
-                // If we have an area, we can try to generate
-                // But since we removed check button, we don't have identifier usually
-                // However, user might expect auto-generate.
-                // Let's enforce manual generation click to be safe/clear
-                showAlert('error', 'Rightmove URL is mandatory. Please enter a URL or click "Generate URL".');
+                try {
+                    // Try to fetch identifier silently if missing
+                    if (!areaIdentifier.value) {
+                        const cleanName = locationName.split(',')[0].trim();
+                        const response = await fetch('/searchproperties/check-area', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Accept': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                            },
+                            body: JSON.stringify({ area: cleanName })
+                        });
+                        
+                        const data = await response.json();
+                        if (data.success && data.found) {
+                            areaIdentifier.value = data.identifier;
+                            areaName.value = data.name;
+                        }
+                    }
+                    
+                    url = buildRightmoveUrl();
+                    generatedUrlInput.value = url;
+                } catch (err) {
+                    console.error('Auto-generation failed:', err);
+                } finally {
+                    saveSearchBtn.disabled = false;
+                }
+            }
+
+            if (!url) {
+                showAlert('error', 'Rightmove URL is mandatory. Please enter a URL or ensure the area is correct.');
                 return;
             }
             
@@ -1239,7 +1262,7 @@
             saveSearchBtn.innerHTML = '<span class="spinner"></span> Saving...';
 
             try {
-                const endpoint = isEdit ? `/api/saved-searches/${editSearchId.value}` : '/api/saved-searches';
+                const endpoint = isEdit ? `/searchproperties/update/${editSearchId.value}` : '/searchproperties/store';
                 const method = isEdit ? 'PUT' : 'POST';
 
                 const response = await fetch(endpoint, {
@@ -1277,7 +1300,7 @@
             searchesBody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:2rem;">Loading...</td></tr>';
 
             try {
-                const response = await fetch('/api/saved-searches', {
+                const response = await fetch('/searchproperties/all', {
                     headers: {
                         'Accept': 'application/json'
                     }
@@ -1442,7 +1465,7 @@
             updateUrlBtn.textContent = 'Updating...';
 
             try {
-                const response = await fetch(`/api/saved-searches/${searchId}`, {
+                const response = await fetch(`/searchproperties/update/${searchId}`, {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1620,17 +1643,42 @@
             // Hide Generate URL button
             document.getElementById('generateUrlBtn').style.display = 'none';
             
-            // Show Visit URL button
+            // Change Cancel button to "Close"
+            cancelModalBtn.textContent = 'Close';
+            
+            // Show Visit URL button and View Results button
             if (search.updates_url) {
                 formVisitUrlBtn.href = search.updates_url;
                 formVisitUrlBtn.style.display = 'inline-flex';
+                
+                // Add "View Results" button dynamically if not exists
+                let viewResultsBtn = document.getElementById('modalViewResultsBtn');
+                if (!viewResultsBtn) {
+                    viewResultsBtn = document.createElement('a');
+                    viewResultsBtn.id = 'modalViewResultsBtn';
+                    viewResultsBtn.className = 'btn btn-primary';
+                    viewResultsBtn.innerHTML = '<svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg> View Results';
+                    document.querySelector('.form-actions').prepend(viewResultsBtn);
+                }
+                viewResultsBtn.href = `/internal-properties/search/${id}`;
+                viewResultsBtn.style.display = 'inline-flex';
             } else {
                 formVisitUrlBtn.style.display = 'none';
             }
 
-            // Ensure modal is active (editSearch already does this, but good to ensure)
+            // Ensure modal is active
             searchModal.classList.add('active');
         };
+
+        // Modify resetForm to handle additional cleanup
+        const originalResetForm = resetForm;
+        function resetFormWithCleanup() {
+            originalResetForm();
+            cancelModalBtn.textContent = 'Cancel';
+            const viewResultsBtn = document.getElementById('modalViewResultsBtn');
+            if (viewResultsBtn) viewResultsBtn.style.display = 'none';
+        }
+        window.resetForm = resetFormWithCleanup;
 
         // Delete Confirmation Modal Elements
         const deleteConfirmModal = document.getElementById('deleteConfirmModal');
@@ -1666,7 +1714,7 @@
             confirmDeleteBtn.textContent = 'Deleting...';
 
             try {
-                const response = await fetch(`/api/saved-searches/${id}`, {
+                const response = await fetch(`/searchproperties/${id}`, {
                     method: 'DELETE',
                     headers: {
                         'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content

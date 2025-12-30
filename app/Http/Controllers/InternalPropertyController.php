@@ -44,6 +44,7 @@ class InternalPropertyController extends Controller
     /**
      * Load full property data from database (used on page refresh)
      * This avoids re-scraping from the source website
+     * OPTIMIZED for fast loading with all sold data
      * 
      * @param Request $request
      * @return \Illuminate\Http\JsonResponse
@@ -51,28 +52,25 @@ class InternalPropertyController extends Controller
     public function loadPropertiesFromDatabase(Request $request)
     {
         try {
+            set_time_limit(300); // 5 minutes for large datasets
+            
             $searchId = $request->input('search_id');
             $page = $request->input('page', 1);
-            $perPage = $request->input('per_page', 50); // Reduced to 50 to prevent timeout with sold data
+            $perPage = $request->input('per_page', 200); // Increased to 200 for faster loading
             
-            Log::info("loadPropertiesFromDatabase: Loading properties for search_id: " . ($searchId ?? 'all') . ", page: {$page}, per_page: {$perPage}");
+            Log::info("loadPropertiesFromDatabase: search_id=" . ($searchId ?? 'all') . ", page={$page}, per_page={$perPage}");
             
             // Build query for properties
             $query = \App\Models\Property::query();
             
             if ($searchId) {
                 $query->where('filter_id', $searchId);
-                Log::info("loadPropertiesFromDatabase: Filtering by filter_id = {$searchId}");
-            } else {
-                Log::info("loadPropertiesFromDatabase: No filter, loading all properties");
             }
             
             // Get total count before pagination
             $totalCount = $query->count();
-            Log::info("loadPropertiesFromDatabase: Total {$totalCount} properties in database");
             
             if ($totalCount === 0) {
-                Log::info("loadPropertiesFromDatabase: No properties found in database");
                 return response()->json([
                     'success' => true,
                     'message' => 'No properties found in database',
@@ -87,20 +85,26 @@ class InternalPropertyController extends Controller
                 ]);
             }
             
-            // Apply pagination and load with relationships
-            // Note: Loading sold properties can be heavy, so using smaller page size
-            $properties = $query->with(['images', 'soldProperties.prices'])
+            // OPTIMIZED: Use select to only get needed columns, efficient eager loading
+            $properties = $query
+                ->select(['id', 'location', 'house_number', 'road_name', 'price', 'sold_link', 
+                         'filter_id', 'bedrooms', 'bathrooms', 'property_type', 'size', 'tenure',
+                         'council_tax', 'parking', 'garden', 'accessibility', 'ground_rent',
+                         'annual_service_charge', 'lease_length', 'key_features', 'description'])
+                ->with([
+                    'images:id,property_id,image_link',
+                    'soldProperties' => function($q) {
+                        $q->select(['id', 'property_id', 'location', 'property_type', 'bedrooms', 'bathrooms', 'tenure', 'image_url']);
+                    },
+                    'soldProperties.prices:id,sold_property_id,sold_price,sold_date'
+                ])
                 ->skip(($page - 1) * $perPage)
                 ->take($perPage)
                 ->get();
             
-            // Debug: Log sold properties for first property
-            if ($properties->count() > 0) {
-                $firstProp = $properties->first();
-                Log::info("loadPropertiesFromDatabase: First property ID={$firstProp->id}, Images={$firstProp->images->count()}, Sold={$firstProp->soldProperties->count()}");
-            }
-            
-            Log::info("loadPropertiesFromDatabase: Loaded {$properties->count()} properties (page {$page})");
+            // Log stats
+            $propsWithSold = $properties->filter(fn($p) => $p->soldProperties->count() > 0)->count();
+            Log::info("loadPropertiesFromDatabase: Page {$page} loaded {$properties->count()} properties, {$propsWithSold} with sold data");
             
             // Format properties using shared formatting method
             $formattedProperties = $this->formatPropertiesForResponse($properties);
@@ -110,7 +114,7 @@ class InternalPropertyController extends Controller
             
             return response()->json([
                 'success' => true,
-                'message' => "Loaded {$properties->count()} properties from database (page {$page} of {$totalPages})",
+                'message' => "Loaded {$properties->count()} properties (page {$page}/{$totalPages})",
                 'count' => count($formattedProperties),
                 'total' => $totalCount,
                 'page' => $page,
@@ -120,7 +124,6 @@ class InternalPropertyController extends Controller
                 'properties' => $formattedProperties,
                 'source' => 'database'
             ]);
-            
             
         } catch (\Exception $e) {
             Log::error("loadPropertiesFromDatabase error: " . $e->getMessage());
@@ -193,7 +196,7 @@ class InternalPropertyController extends Controller
                     $latestTimestamp = 0;
                     
                     $prices = $sold->prices ? $sold->prices->map(function($price) use (&$latestSaleInPeriod, &$latestTimestamp) {
-                        // Parse date for period check (Jan 2020 - Dec 2025)
+                        // Parse date for period check (Jan 2020 - 2025)
                         $timestamp = strtotime($price->sold_date);
                         if ($timestamp) {
                             $year = (int)date('Y', $timestamp);
@@ -219,10 +222,30 @@ class InternalPropertyController extends Controller
                     if ($latestSaleInPeriod) {
                         $uniqueLatestSalesInPeriod[] = $latestSaleInPeriod;
                         
-                        // Check if types match (fuzzy match for Semi-Detached etc)
+                        // Check if types match using BROAD CATEGORIES for better matching
                         $soldType = strtolower($sold->property_type ?? '');
-                        if ($subjectType && $soldType && (str_contains($soldType, $subjectType) || str_contains($subjectType, $soldType))) {
-                             $uniqueLatestSalesSameType[] = $latestSaleInPeriod;
+                        
+                        // Define property type categories
+                        $houseTypes = ['house', 'detached', 'semi-detached', 'terraced', 'bungalow', 'cottage', 'villa', 'end terrace', 'mid terrace'];
+                        $flatTypes = ['flat', 'apartment', 'maisonette', 'studio', 'penthouse'];
+                        
+                        $isSubjectHouse = false;
+                        $isSubjectFlat = false;
+                        $isSoldHouse = false;
+                        $isSoldFlat = false;
+                        
+                        foreach ($houseTypes as $ht) {
+                            if (str_contains($subjectType, $ht)) $isSubjectHouse = true;
+                            if (str_contains($soldType, $ht)) $isSoldHouse = true;
+                        }
+                        foreach ($flatTypes as $ft) {
+                            if (str_contains($subjectType, $ft)) $isSubjectFlat = true;
+                            if (str_contains($soldType, $ft)) $isSoldFlat = true;
+                        }
+                        
+                        // Match if both are houses or both are flats
+                        if (($isSubjectHouse && $isSoldHouse) || ($isSubjectFlat && $isSoldFlat)) {
+                            $uniqueLatestSalesSameType[] = $latestSaleInPeriod;
                         }
                     }
                     
@@ -258,24 +281,41 @@ class InternalPropertyController extends Controller
                     }
                     
                     if ($advertisedPrice > 0 && $avgSoldPrice > 0) {
-                        // Intuitive logic: (Advertised - Average) / Average
-                        // Positive result = Premium (priced above average)
-                        // Negative result = Discount (priced below average)
+                        // SWAPPED logic as per user request:
+                        // (Advertised - Average) / Average
+                        // Positive result = DISCOUNT (priced above average - GREEN)
+                        // Negative result = PREMIUM (priced below average - RED)
                         $discountMetric = (($advertisedPrice - $avgSoldPrice) / $avgSoldPrice) * 100;
+                        
+                        // Debug log the calculation
+                        Log::info("DISCOUNT CALC for Property {$prop->id}: Advertised=£{$advertisedPrice}, AvgSold=£{$avgSoldPrice}, Discount=" . round($discountMetric, 2) . "% (" . ($discountMetric >= 0 ? 'DISCOUNT' : 'PREMIUM') . ")");
+                    } else {
+                        Log::warning("DISCOUNT CALC FAILED for Property {$prop->id}: Advertised={$advertisedPrice}, AvgSold={$avgSoldPrice}");
                     }
                 }
             } else {
                 // Debug: Log why no sold properties are found
-                Log::info("Property {$prop->id} has no sold properties. sold_link: " . ($prop->sold_link ?? 'NULL'));
+                Log::info("Property {$prop->id} has NO sold properties. sold_link: " . ($prop->sold_link ?? 'NULL'));
             }
             
-            // Extract house number and road name
+            // Extract house number and road name using more robust logic
             $address = $prop->location ?? 'Unknown location';
             $houseNumber = '';
             $roadName = $address;
-            if (preg_match('/^(\d+[A-Za-z]?),\s*(.*)$/', $address, $matches)) {
-                $houseNumber = $matches[1];
-                $roadName = $matches[2];
+            
+            // Try to use already parsed database values if available
+            if (!empty($prop->house_number) || !empty($prop->road_name)) {
+                $houseNumber = $prop->house_number ?? '';
+                $roadName = $prop->road_name ?? $address;
+            } else {
+                // On-the-fly parsing if columns are empty
+                if (preg_match('/^(Flat|Apartment|Suite|Unit)\s+([^\s,]+),\s*(.+)$/i', $address, $matches)) {
+                    $houseNumber = $matches[1] . ' ' . $matches[2];
+                    $roadName = $matches[3];
+                } elseif (preg_match('/^([0-9a-z\/-]+),\s*(.+)$/i', $address, $matches)) {
+                    $houseNumber = $matches[1];
+                    $roadName = $matches[2];
+                }
             }
 
             return [
@@ -914,9 +954,13 @@ class InternalPropertyController extends Controller
             $limit = $request->input('limit', 10);
             $propertyId = $request->input('property_id');
             
-            // Get properties with sold_link
-            $query = \App\Models\Property::whereNotNull('sold_link')
-                ->where('sold_link', '!=', '');
+            // Get properties with sold_link or specific property
+            $query = \App\Models\Property::query();
+
+            // If finding generic ones to process, prefer those with sold_link, but strict only if bulk
+            if (!$propertyId) {
+                $query->whereNotNull('sold_link')->where('sold_link', '!=', '');
+            }
                 
             if ($propertyId) {
                 $query->where('id', $propertyId);
@@ -946,7 +990,31 @@ class InternalPropertyController extends Controller
             
             foreach ($properties as $property) {
                 try {
-                    Log::info("Processing sold link for property {$property->id}: {$property->sold_link}");
+                    Log::info("Processing sold link for property {$property->id}: " . ($property->sold_link ?? 'Missing'));
+                    
+                    // Deep Search Algorithm: If sold_link is missing, try to construct it from location
+                    if (empty($property->sold_link)) {
+                        $postcode = null;
+                        // Extract postcode from location (e.g. "Bath, BA1 1AA" or "BA1 1AA")
+                        if (preg_match('/([A-Z]{1,2}[0-9][0-9A-Z]?\s*[0-9][A-Z]{2})/i', $property->location, $matches)) {
+                            $postcode = strtoupper(str_replace(' ', '', $matches[1])); // Normalize to BA11AA
+                        }
+                        
+                        if ($postcode && strlen($postcode) >= 5) {
+                            $outcode = substr($postcode, 0, strlen($postcode) - 3);
+                            $incode = substr($postcode, -3);
+                            $derivedLink = "https://www.rightmove.co.uk/house-prices/{$outcode}-{$incode}.html";
+                            
+                            Log::info("Deep Search: Derived sold link for property {$property->id} from postcode {$postcode}: {$derivedLink}");
+                            
+                            // Save this derived link to the property so we don't have to guess again
+                            $property->sold_link = $derivedLink;
+                            $property->save();
+                        } else {
+                            Log::warning("Deep Search Failed: Could not extract valid postcode from location: " . $property->location);
+                            continue;
+                        }
+                    }
                     
                     // Scrape sold properties from the sold link
                     $soldData = $this->propertyService->scrapeSoldProperties($property->sold_link, $property->id);

@@ -1642,7 +1642,7 @@
                 <svg class="sync-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
                 </svg>
-                Import Properties (Step: 01)
+                Import Properties
             </button>
             @endif
         </div>
@@ -1721,10 +1721,17 @@
             </div>
         </div>
 
-        <!-- Loading State -->
+        <!-- Loading State - FROM DATABASE -->
         <div class="loading" id="loading">
             <div class="spinner"></div>
-            <p>Loading properties...</p>
+            <p id="loadingText">Loading properties from database...</p>
+        </div>
+        
+        <!-- Loading State - FROM SOURCE WEBSITE -->
+        <div class="loading" id="importLoading" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(5, 150, 105, 0.1));">
+            <div class="spinner" style="border-top-color: #10b981;"></div>
+            <p style="color: #10b981; font-weight: 600;">Fetching data from source website...</p>
+            <p style="color: var(--text-secondary); font-size: 0.8rem; margin-top: 0.5rem;">This may take several minutes for large datasets</p>
         </div>
 
         <!-- Empty State -->
@@ -1748,8 +1755,6 @@
         let propertyData = null;
         let propertyUrls = [];
         let loadedProperties = [];
-        let displayedProperties = [];  // Tracks current sort state for pagination
-        let currentSortType = 'default';  // Tracks current sort selection
         let currentPage = 1;
         const itemsPerPage = 10; // Show 10 properties per page
         
@@ -1817,7 +1822,6 @@
                 loadedCount.textContent = data.properties.length;
                 
                 loadedProperties = data.properties;
-                displayedProperties = [...loadedProperties];  // Initialize displayed properties
                 propertyUrls = data.properties.map(p => ({ url: p.url, id: p.id }));
                 
                 console.log(`✓ Loaded page 1: ${data.properties.length} properties`);
@@ -1825,33 +1829,34 @@
                 console.log(`Images in first property: ${data.properties[0]?.images?.length || 0}`);
                 console.log(`Sold data in first property: ${data.properties[0]?.sold_properties?.length || 0}`);
                 
-                displayProperties(displayedProperties);
+                displayProperties(loadedProperties);
                 loading.classList.remove('active');
                 showAlert('success', `Loaded ${data.properties.length} of ${data.total} properties`);
                 
                 // If there are more pages, load them in background
                 if (data.has_more) {
-                    console.log(`Loading remaining pages in background...`);
+                    console.log(`Loading remaining ${data.total_pages - 1} pages in background...`);
+                    showAlert('success', `Loading remaining pages... Please wait.`);
+                    
                     for (let page = 2; page <= data.total_pages; page++) {
                         const pageData = await loadPropertiesPage(page);
                         if (pageData && pageData.properties) {
+                            // Debug: Check sold data on this page
+                            const withSold = pageData.properties.filter(p => p.sold_properties && p.sold_properties.length > 0).length;
+                            console.log(`✓ Page ${page}: ${pageData.properties.length} properties, ${withSold} with sold data`);
+                            
                             loadedProperties = loadedProperties.concat(pageData.properties);
                             propertyUrls = propertyUrls.concat(pageData.properties.map(p => ({ url: p.url, id: p.id })));
                             
-                            // Update displayed properties with current sort
-                            sortProperties(currentSortType, false);  // Re-sort but don't reset page
-                            
                             // Update loaded count progressively
                             loadedCount.textContent = loadedProperties.length;
-                            console.log(`✓ Loaded page ${page}: ${loadedProperties.length} / ${data.total} properties`);
-                            
-                            // Refresh display if on first page to show new items
-                            if (currentPage === 1) {
-                                displayProperties(displayedProperties);
-                            }
                         }
                     }
-                    showAlert('success', `All ${loadedProperties.length} properties loaded successfully!`);
+                    
+                    // Now display with all data loaded
+                    console.log(`All pages loaded. Total: ${loadedProperties.length} properties`);
+                    displayProperties(loadedProperties);
+                    showAlert('success', `All ${loadedProperties.length} properties loaded with sold data!`);
                 }
                 
             } catch (error) {
@@ -1864,12 +1869,12 @@
             }
         }
         
-        // Load a single page of properties from database
+        // Load a single page of properties from database - OPTIMIZED for speed
         async function loadPropertiesPage(page) {
             try {
                 const url = window.searchContext 
-                    ? `/api/internal-property/load-from-db?search_id=${window.searchContext.id}&page=${page}&per_page=50` 
-                    : `/api/internal-property/load-from-db?page=${page}&per_page=50`;
+                    ? `/internal-properties/load?search_id=${window.searchContext.id}&page=${page}&per_page=200` 
+                    : `/internal-properties/load?page=${page}&per_page=200`;
                 
                 console.log(`Loading page ${page} from:`, url);
                 
@@ -1904,6 +1909,8 @@
         // Import all properties with OPTIMIZED concurrent progressive loading
         // This is called when user clicks the Import button
         async function importAllProperties(isImport = true) {
+            const importLoading = document.getElementById('importLoading');
+            
             try {
                 // Hide empty state if we are importing
                 emptyState.classList.remove('active');
@@ -1911,16 +1918,16 @@
                 successAlert.classList.remove('active');
                 errorAlert.classList.remove('active');
                 
-                // Show loading
-                loading.classList.add('active');
+                // Show IMPORT loader (green - for source website)
+                importLoading.classList.add('active');
                 syncBtn.disabled = true;
 
-                showAlert('success', 'Importing property URLs from source website... This may take 2-5 minutes. Please wait.');
+                showAlert('success', 'Fetching property URLs from source website... Please wait.');
                 
                 // Always fetch from source when importing (isImport=true)
                 const url = window.searchContext 
-                    ? `/api/internal-property/fetch-urls?search_id=${window.searchContext.id}&import=true` 
-                    : `/api/internal-property/fetch-urls?import=true`;
+                    ? `/internal-properties/fetch-urls?search_id=${window.searchContext.id}&import=true` 
+                    : `/internal-properties/fetch-urls?import=true`;
                 
                 // Create AbortController with 10 minute timeout for URL scraping
                 const controller = new AbortController();
@@ -1989,6 +1996,7 @@
 
                 displayProperties(loadedProperties);
                 loading.classList.remove('active');
+                importLoading.classList.remove('active'); // Hide import loader since we now show progress bar
                 
                 showAlert('success', `Showing ${loadedProperties.length} properties. Fetching details from source...`);
 
@@ -2090,11 +2098,17 @@
                                 
                                 // Update progress after each chunk completes
                                 updateProgress(processed, urls.length, startTime, batchIndex + 1, totalBatches);
+
+                                // Re-sort current view if details arrived for properties
+                                const sortSelect = document.getElementById('sortProperties');
+                                if (sortSelect && sortSelect.value && sortSelect.value !== 'default') {
+                                    sortProperties(sortSelect.value);
+                                }
                             }
                             return result;
                         })
                         .catch(err => {
-                            console.error(`Chunk ${batchIndex + 1} failed:`, err);
+                            console.error(`Error in chunk ${batchIndex + 1}:`, err);
                             return { success: false, error: err.message };
                         });
                     
@@ -2106,10 +2120,73 @@
                 await Promise.all(batchPromises);
             }
 
-            // Hide progress bar and show completion
+            // Hide progress bar and import loader, show completion
             hideProgressBar();
+            document.getElementById('importLoading').classList.remove('active');
             syncBtn.disabled = false;
-            showAlert('success', `✓ Import complete! ${processed} properties with full data loaded 🎉`);
+            showAlert('success', `✓ Import complete! ${processed} properties loaded. Now fetching sold data...`);
+            
+            // AUTOMATICALLY FETCH SOLD DATA FOR ALL PROPERTIES
+            await autoFetchAllSoldData();
+        }
+        
+        // Automatically fetch sold data for ALL properties that don't have it
+        async function autoFetchAllSoldData() {
+            console.log('🔄 Starting automatic sold data fetch for all properties...');
+            
+            const propsWithoutSold = loadedProperties.filter(p => 
+                !p.sold_properties || p.sold_properties.length === 0
+            );
+            
+            if (propsWithoutSold.length === 0) {
+                console.log('✅ All properties already have sold data');
+                showAlert('success', '✅ All properties have sold data. Ready!');
+                return;
+            }
+            
+            showAlert('success', `Fetching sold data for ${propsWithoutSold.length} properties...`);
+            
+            let fetched = 0;
+            let totalSoldFound = 0;
+            
+            for (const prop of propsWithoutSold) {
+                try {
+                    const response = await fetch('/internal-properties/process-sold', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                            'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                        },
+                        body: JSON.stringify({ property_id: prop.id })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success && data.property) {
+                        const idx = loadedProperties.findIndex(p => p.id == prop.id);
+                        if (idx !== -1) {
+                            loadedProperties[idx] = data.property;
+                            totalSoldFound += data.property.sold_properties?.length || 0;
+                        }
+                    }
+                } catch (err) {
+                    console.error(`Error fetching sold for ${prop.id}:`, err);
+                }
+                
+                fetched++;
+                
+                // Update progress every 10 properties
+                if (fetched % 10 === 0) {
+                    console.log(`Sold data: ${fetched}/${propsWithoutSold.length} processed`);
+                }
+            }
+            
+            // Refresh display with new sold data
+            displayProperties(loadedProperties);
+            
+            console.log(`✅ Sold data fetch complete. Found ${totalSoldFound} sold records.`);
+            showAlert('success', `✅ Complete! ${totalSoldFound} sold records loaded. Discount badges ready!`);
         }
         
         // Progress Bar Helper Functions
@@ -2176,7 +2253,7 @@
             console.log(`Fetching batch ${batchNum}/${totalBatches} (${batch.length} properties)`);
             
             try {
-                const response = await fetch('/api/internal-property/fetch-all', {
+                const response = await fetch('/internal-properties/fetch-all', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -2258,6 +2335,23 @@
 
         // Display properties in grid with pagination
         function displayProperties(props) {
+            // DEBUG: Analyze discount metric distribution (with inverted metric)
+            const discountProps = props.filter(p => p.discount_metric !== null && p.discount_metric !== undefined && parseFloat(p.discount_metric) >= 0);
+            const premiumProps = props.filter(p => p.discount_metric !== null && p.discount_metric !== undefined && parseFloat(p.discount_metric) < 0);
+            const noDataProps = props.filter(p => p.discount_metric === null || p.discount_metric === undefined);
+            
+            console.log('📊 DISCOUNT METRIC ANALYSIS (Inverted: Positive=Discount, Negative=Premium):');
+            console.log(`   🟢 Properties with DISCOUNT (green badge, positive): ${discountProps.length}`);
+            console.log(`   🔴 Properties with PREMIUM (red badge, negative): ${premiumProps.length}`);
+            console.log(`   ⚪ Properties with NO DATA: ${noDataProps.length}`);
+            
+            if (discountProps.length > 0) {
+                console.log('   🟢 Sample discounts:', discountProps.slice(0, 3).map(p => ({addr: p.address, metric: p.discount_metric})));
+            }
+            if (premiumProps.length > 0) {
+                console.log('   🔴 Sample premiums:', premiumProps.slice(0, 3).map(p => ({addr: p.address, metric: p.discount_metric})));
+            }
+            
             // Calculate slice for current page
             const startIndex = (currentPage - 1) * itemsPerPage;
             const endIndex = startIndex + itemsPerPage;
@@ -2399,6 +2493,19 @@
             `;
         }
 
+        // Helper to handle sold property image errors
+        function handleSoldImageError(img) {
+            const mapUrl = img.getAttribute('data-map');
+            if (mapUrl && !img.dataset.triedMap) {
+                img.dataset.triedMap = "true";
+                img.src = mapUrl;
+                console.log("Image failed, switching to map:", mapUrl);
+            } else {
+                img.src = 'https://via.placeholder.com/260x180/eee/999?text=No+Photo';
+                img.onerror = null; // Prevent infinite loop
+            }
+        }
+
         // Go to specific page
         function goToPage(page) {
             page = parseInt(page);
@@ -2406,7 +2513,7 @@
             
             if (page >= 1 && page <= totalPages) {
                 currentPage = page;
-                displayProperties(displayedProperties);  // Use sorted array
+                displayProperties(loadedProperties);
                 document.getElementById('header')?.scrollIntoView({ behavior: 'smooth' });
             } else {
                 // Reset input to current page if invalid
@@ -2423,8 +2530,36 @@
 
             if (newPage >= 1 && newPage <= totalPages) {
                 currentPage = newPage;
-                displayProperties(displayedProperties);  // Use sorted array
+                displayProperties(loadedProperties);
                 document.getElementById('header')?.scrollIntoView({ behavior: 'smooth' });
+            }
+        }
+
+        // Smart Deep Search Trigger
+        // Automatically checks a list of properties for missing sold data and triggers import
+        async function checkAndTriggerDeepSearch(properties) {
+            console.log('🔍 Checking for missing sold data in ' + properties.length + ' properties...');
+            
+            const missingDataProps = properties.filter(p => 
+                (!p.sold_properties || p.sold_properties.length === 0) &&
+                !p.deep_search_attempted // custom flag to prevent infinite loops
+            );
+            
+            if (missingDataProps.length > 0) {
+                console.log(`found ${missingDataProps.length} properties with missing sold data. Initiating Deep Search...`);
+                showAlert('success', `Found ${missingDataProps.length} properties missing sold data. Deep searching source...`);
+                
+                // Process one by one to avoid overwhelming server
+                for (const prop of missingDataProps) {
+                    // Mark as attempted so we don't try again repeatedly
+                    prop.deep_search_attempted = true;
+                    
+                    // Trigger import
+                    await importAllSoldHistory(new Event('submit'), prop.id, true); // true = silent/background mode
+                    
+                    // Small delay
+                    await new Promise(r => setTimeout(r, 1000));
+                }
             }
         }
 
@@ -2432,102 +2567,57 @@
         // Sorting Handlers
         function handleSortChange() {
             const sortType = document.getElementById('sortSelect').value;
-            sortProperties(sortType, true);  // Reset to page 1 when user changes sort
+            sortProperties(sortType);
         }
 
-        function sortProperties(type, resetPage = true) {
-            currentSortType = type;  // Store current sort type
-            let sorted = [...loadedProperties];
+        function sortProperties(type) {
+            // Sort the loadedProperties array DIRECTLY so pagination uses sorted order
             
             switch(type) {
                 case 'price_low':
-                    sorted.sort((a, b) => parseNumericPrice(a.price) - parseNumericPrice(b.price));
+                    loadedProperties.sort((a, b) => parseNumericPrice(a.price) - parseNumericPrice(b.price));
                     break;
                 case 'price_high':
-                    sorted.sort((a, b) => parseNumericPrice(b.price) - parseNumericPrice(a.price));
+                    loadedProperties.sort((a, b) => parseNumericPrice(b.price) - parseNumericPrice(a.price));
                     break;
                 case 'avg_price_low':
-                    sorted.sort((a, b) => (parseFloat(a.average_sold_price) || 0) - (parseFloat(b.average_sold_price) || 0));
+                    loadedProperties.sort((a, b) => (parseFloat(a.average_sold_price) || 0) - (parseFloat(b.average_sold_price) || 0));
                     break;
                 case 'avg_price_high':
-                    sorted.sort((a, b) => (parseFloat(b.average_sold_price) || 0) - (parseFloat(a.average_sold_price) || 0));
+                    loadedProperties.sort((a, b) => (parseFloat(b.average_sold_price) || 0) - (parseFloat(a.average_sold_price) || 0));
                     break;
                 case 'discount_high':
-                    // Largest Discount sorting:
-                    // 1. Discounts (negative values) first, sorted by largest discount (most negative first)
-                    // 2. Then premiums (positive values), sorted from lowest to highest
-                    // 3. Nulls/undefined at the very bottom
-                    sorted.sort((a, b) => {
-                        const valA = a.discount_metric;
-                        const valB = b.discount_metric;
-                        
-                        // Handle nulls - push to bottom
-                        const aIsNull = valA === null || valA === undefined;
-                        const bIsNull = valB === null || valB === undefined;
-                        
-                        if (aIsNull && bIsNull) return 0;
-                        if (aIsNull) return 1;  // a goes to bottom
-                        if (bIsNull) return -1; // b goes to bottom
-                        
-                        const numA = parseFloat(valA);
-                        const numB = parseFloat(valB);
-                        
-                        // Both are discounts (negative) - largest discount first (more negative first)
-                        if (numA < 0 && numB < 0) {
-                            return numA - numB; // -30 comes before -10
-                        }
-                        
-                        // Both are premiums (positive) - lowest premium first
-                        if (numA >= 0 && numB >= 0) {
-                            return numA - numB; // 5 comes before 20
-                        }
-                        
-                        // One is discount, one is premium - discount comes first
-                        if (numA < 0 && numB >= 0) return -1; // discount first
-                        if (numA >= 0 && numB < 0) return 1;  // discount first
-                        
-                        return 0;
+                    // MATHEMATICAL DESCENDING: +50%, +10%, 0%, -1%, -10%, -50%
+                    // This puts Discounts (Green) first by magnitude, then Premiums (Red) by lowest magnitude first.
+                    loadedProperties.sort((a, b) => {
+                        const vA = (a.discount_metric !== null && a.discount_metric !== undefined && !isNaN(parseFloat(a.discount_metric))) 
+                            ? parseFloat(a.discount_metric) : -1e12;
+                        const vB = (b.discount_metric !== null && b.discount_metric !== undefined && !isNaN(parseFloat(b.discount_metric))) 
+                            ? parseFloat(b.discount_metric) : -1e12;
+                        return vB - vA;
                     });
+                    
+                    console.log('--- SORT DEBUG: Largest Discount ---');
+                    console.log('Total items:', loadedProperties.length);
+                    loadedProperties.slice(0, 5).forEach((p, i) => console.log(`${i+1}. ${p.address?.substring(0, 30)}: ${p.discount_metric}%`));
                     break;
+                    
                 case 'discount_low':
-                    // Smallest Discount / Largest Premium sorting:
-                    // 1. Premiums first (positive values), sorted from highest to lowest
-                    // 2. Then discounts (negative values), sorted from smallest to largest
-                    // 3. Nulls/undefined at the very bottom
-                    sorted.sort((a, b) => {
-                        const valA = a.discount_metric;
-                        const valB = b.discount_metric;
-                        
-                        // Handle nulls - push to bottom
-                        const aIsNull = valA === null || valA === undefined;
-                        const bIsNull = valB === null || valB === undefined;
-                        
-                        if (aIsNull && bIsNull) return 0;
-                        if (aIsNull) return 1;  // a goes to bottom
-                        if (bIsNull) return -1; // b goes to bottom
-                        
-                        const numA = parseFloat(valA);
-                        const numB = parseFloat(valB);
-                        
-                        // Both are premiums (positive) - largest premium first
-                        if (numA >= 0 && numB >= 0) {
-                            return numB - numA; // 20 comes before 5
-                        }
-                        
-                        // Both are discounts (negative) - smallest discount first (less negative first)
-                        if (numA < 0 && numB < 0) {
-                            return numB - numA; // -10 comes before -30
-                        }
-                        
-                        // One is discount, one is premium - premium comes first
-                        if (numA >= 0 && numB < 0) return -1; // premium first
-                        if (numA < 0 && numB >= 0) return 1;  // premium first
-                        
-                        return 0;
+                    // SMALLEST DISCOUNT / LARGEST PREMIUM FIRST (with inverted metric):
+                    // Negative values = Premium (RED) - show these first (-30%, -20%)
+                    // Then positive values = Discount (GREEN) - (+5%, +10%, +30%)
+                    // Sort ASCENDING: -30 < -10 < +5 < +20 < null
+                    loadedProperties.sort((a, b) => {
+                        const valA = (a.discount_metric !== null && a.discount_metric !== undefined && !isNaN(parseFloat(a.discount_metric))) 
+                            ? parseFloat(a.discount_metric) : 999999;
+                        const valB = (b.discount_metric !== null && b.discount_metric !== undefined && !isNaN(parseFloat(b.discount_metric))) 
+                            ? parseFloat(b.discount_metric) : 999999;
+                        return valA - valB; // Ascending: most premium (negative) first
                     });
                     break;
+                    
                 case 'road_asc':
-                    sorted.sort((a, b) => {
+                    loadedProperties.sort((a, b) => {
                         const roadA = (a.road_name || a.address || '').toLowerCase();
                         const roadB = (b.road_name || b.address || '').toLowerCase();
                         return roadA.localeCompare(roadB);
@@ -2538,12 +2628,8 @@
                     break;
             }
             
-            displayedProperties = sorted;  // Store sorted array for pagination
-            
-            if (resetPage) {
-                currentPage = 1;
-            }
-            displayProperties(displayedProperties);
+            currentPage = 1;
+            displayProperties(loadedProperties);
         }
 
         function parseNumericPrice(priceStr) {
@@ -2593,9 +2679,9 @@
                         </div>
                         
                         <div class="property-info-section">
-                            ${property.discount_metric !== null && property.discount_metric !== undefined ? `
-                                <div class="discount-badge" style="${property.discount_metric > 0 ? 'background: var(--error);' : ''}">
-                                    ${Math.abs(Math.round(property.discount_metric))}% ${property.discount_metric > 0 ? 'Premium' : 'Discount'}
+                            ${property.discount_metric !== null && property.discount_metric !== undefined && !isNaN(parseFloat(property.discount_metric)) ? `
+                                <div class="discount-badge" style="background-color: ${parseFloat(property.discount_metric) >= 0 ? '#10b981' : '#ef4444'}; color: white;">
+                                    ${Math.abs(Math.round(property.discount_metric))}% ${parseFloat(property.discount_metric) >= 0 ? 'Discount' : 'Premium'}
                                 </div>
                             ` : ''}
                             
@@ -2632,10 +2718,10 @@
                                     const formattedAvg = '£' + Math.round(property.average_sold_price).toLocaleString('en-GB');
                                     const count = property.sales_count_in_period || 0;
                                     return `
-                                        <div class="avg-sold-price">
-                                            <span class="avg-label">Avg Sold Price</span>
-                                            <span class="avg-value">${formattedAvg}</span>
-                                            <span class="avg-count">(${count} sale${count !== 1 ? 's' : ''} in period)</span>
+                                        <div style="background: linear-gradient(135deg, #f0f9ff, #e0f2fe); padding: 10px 12px; border-radius: 8px; margin: 8px 0; border-left: 4px solid #0ea5e9;">
+                                            <div style="font-size: 0.75rem; color: #0369a1; font-weight: 600; margin-bottom: 4px;">AVG SOLD PRICE</div>
+                                            <div style="font-size: 1.25rem; font-weight: 700; color: #0c4a6e;">${formattedAvg}</div>
+                                            <div style="font-size: 0.7rem; color: #64748b;">(${count} sale${count !== 1 ? 's' : ''} in period)</div>
                                         </div>
                                     `;
                                 }
@@ -2722,15 +2808,57 @@
                             ${property.sold_properties && property.sold_properties.length > 0 ? 
                                 property.sold_properties.map(sold => {
                                     const soldLink = sold.detail_url || property.sold_link || '#';
-                                    const soldPhoto = sold.image_url || sold.map_url || 'https://via.placeholder.com/80x60/eee/999?text=No+Photo';
                                     const soldHouse = sold.house_number || '';
                                     const soldRoad = sold.road_name || sold.location || '';
+                                    
+                                    const priceHtml = Array.isArray(sold.prices) ? 
+                                        sold.prices.map(p => {
+                                            if (!p.sold_price) return '';
+                                            const raw = p.sold_price.toString().replace(/[^0-9.]/g, '');
+                                            if (raw === '' || isNaN(parseFloat(raw))) {
+                                                return `<div class="sold-tx-row"><span class="sold-tx-date">${p.sold_date || '-'}</span><span class="sold-tx-price">${p.sold_price}</span></div>`;
+                                            }
+                                            const cleanPrice = parseFloat(raw);
+                                            const fmtPrice = '£' + Math.round(cleanPrice).toLocaleString('en-GB');
+                                            
+                                            return `
+                                                <div class="sold-tx-row">
+                                                    <span class="sold-tx-date">${p.sold_date || '-'}</span>
+                                                    <span class="sold-tx-price">${fmtPrice}</span>
+                                                </div>
+                                            `;
+                                        }).join('') : '';
+                                    
+                                    // Robust check for placeholder images to trigger map fallback
+                                    const imgUrl = (sold.image_url || '').toString().toLowerCase();
+                                    const isPlaceholder = !imgUrl || 
+                                                         imgUrl.includes('placeholder') || 
+                                                         imgUrl.includes('no-photo') ||
+                                                         imgUrl.includes('no_photo') ||
+                                                         imgUrl.includes('noimage') ||
+                                                         imgUrl.includes('notavailable') ||
+                                                         imgUrl.includes('loading') ||
+                                                         imgUrl.includes('no_image') || // Added common variants
+                                                         imgUrl.includes('empty') ||
+                                                         imgUrl.length < 15;
+                                                         
+                                    // Use map automatically if detected placeholder
+                                    const soldPhoto = (isPlaceholder && sold.map_url) ? sold.map_url : (sold.image_url || sold.map_url || 'https://via.placeholder.com/260x180/eee/999?text=No+Photo');
+                                    
+                                    if (isPlaceholder && sold.map_url) {
+                                        console.log(`Map forced for ${soldHouse} ${soldRoad} (Detected placeholder: ${imgUrl})`);
+                                    }
                                     
                                     return `
                                     <a href="${soldLink}" target="_blank" class="sold-item-card-link" onclick="event.stopPropagation()">
                                         <div class="sold-item-card">
                                             <div class="sold-property-photo">
-                                                <img src="${soldPhoto}" alt="Property" loading="lazy" onerror="this.src='https://via.placeholder.com/260x180/eee/999?text=No+Photo'">
+                                                <img src="${soldPhoto}" 
+                                                     alt="Property" 
+                                                     loading="lazy" 
+                                                     class="sold-img"
+                                                     data-map="${sold.map_url || ''}"
+                                                     onerror="handleSoldImageError(this)">
                                             </div>
                                             <div class="sold-property-main">
                                                 <div class="sold-property-type">
@@ -2744,14 +2872,7 @@
                                                     ${sold.bathrooms ? `<span class="sold-bath-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h16a1 1 0 011 1v3a4 4 0 01-4 4H7a4 4 0 01-4-4v-3a1 1 0 011-1z"/><path d="M6 12V5a2 2 0 012-2h3v2.25"/></svg> ${sold.bathrooms}</span>` : ''}
                                                 </div>
                                                 <div class="sold-property-transactions">
-                                                    ${sold.prices && sold.prices.length > 0 ? 
-                                                        sold.prices.slice(0, 3).map(price => `
-                                                            <div class="sold-tx-row">
-                                                                 <span class="sold-tx-date">${price.sold_date || '-'}</span>
-                                                                <span class="sold-tx-price">${price.sold_price || '-'}</span>
-                                                            </div>
-                                                        `).join('')
-                                                    : `<div style="font-size:0.8rem; color:var(--text-secondary);">No price data</div>`}
+                                                    ${priceHtml ? priceHtml : `<div style="font-size:0.8rem; color:var(--text-secondary);">No price data</div>`}
                                                 </div>
                                             </div>
                                         </div>
@@ -2894,10 +3015,10 @@
                 console.log('🔄 importSoldDataInBackground: Starting...');
                 showAlert('success', 'Loading sold property data in background...');
                 
-                console.log('🔄 Calling /api/internal-property/process-sold-links...');
+                console.log('🔄 Calling /internal-properties/process-sold...');
                 
                 // Call the existing processSoldLinks endpoint
-                const response = await fetch('/api/internal-property/process-sold-links', {
+                const response = await fetch('/internal-properties/process-sold', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -2948,23 +3069,121 @@
             }
         }
         
-        // Import ALL sold property history for a specific property
-        async function importAllSoldHistory(event, propertyId) {
-            event.preventDefault();
-            event.stopPropagation();
+        // Fetch ALL sold data for ALL properties (bulk import)
+        async function fetchAllSoldData() {
+            const fetchBtn = document.getElementById('fetchSoldBtn');
+            if (!fetchBtn) return;
             
-            const btn = document.getElementById(`header-import-${propertyId}`);
-            if (!btn || btn.disabled) return;
-            
-            // Show loading state
-            btn.classList.add('loading');
-            btn.disabled = true;
+            fetchBtn.disabled = true;
+            fetchBtn.innerHTML = `
+                <svg class="sync-icon spinning" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
+                Fetching Sold Data...
+            `;
             
             try {
-                console.log(`📡 Importing all sold history for property ${propertyId}...`);
-                showAlert('success', 'Fetching complete sold history... this may take a moment.');
+                showAlert('success', 'Fetching sold data for ALL properties. This may take several minutes...');
                 
-                const response = await fetch('/api/internal-property/process-sold-links', {
+                // Process in batches of 10 properties at a time
+                const batchSize = 10;
+                let processed = 0;
+                let totalSold = 0;
+                
+                for (let i = 0; i < loadedProperties.length; i += batchSize) {
+                    const batch = loadedProperties.slice(i, i + batchSize);
+                    
+                    for (const prop of batch) {
+                        // Skip if already has sold data
+                        if (prop.sold_properties && prop.sold_properties.length > 0) {
+                            processed++;
+                            continue;
+                        }
+                        
+                        try {
+                            const response = await fetch('/internal-properties/process-sold', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Accept': 'application/json',
+                                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                                },
+                                body: JSON.stringify({
+                                    property_id: prop.id
+                                })
+                            });
+                            
+                            const data = await response.json();
+                            
+                            if (data.success && data.property) {
+                                // Update local data
+                                const idx = loadedProperties.findIndex(p => p.id == prop.id);
+                                if (idx !== -1) {
+                                    loadedProperties[idx] = data.property;
+                                }
+                                totalSold += data.sold_properties || 0;
+                            }
+                        } catch (err) {
+                            console.error(`Error fetching sold data for property ${prop.id}:`, err);
+                        }
+                        
+                        processed++;
+                    }
+                    
+                    // Update progress
+                    fetchBtn.innerHTML = `
+                        <svg class="sync-icon spinning" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        ${processed}/${loadedProperties.length} Done
+                    `;
+                    
+                    // Small delay between batches
+                    await new Promise(r => setTimeout(r, 500));
+                }
+                
+                // Refresh display
+                displayProperties(loadedProperties);
+                
+                showAlert('success', `✅ Sold data fetched! Found ${totalSold} sold records. Discount badges should now appear.`);
+                
+            } catch (error) {
+                console.error('Error fetching all sold data:', error);
+                showAlert('error', `Error: ${error.message}`);
+            } finally {
+                fetchBtn.disabled = false;
+                fetchBtn.innerHTML = `
+                    <svg class="sync-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    Fetch All Sold Data (Step: 02)
+                `;
+            }
+        }
+        
+        // Import ALL sold property history for a specific property
+        async function importAllSoldHistory(event, propertyId, silentMode = false) {
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            
+            const btn = document.getElementById(`header-import-${propertyId}`);
+            if (btn && btn.disabled && !silentMode) return;
+            
+            // Show loading state
+            if (btn) {
+                btn.classList.add('loading');
+                btn.disabled = true;
+            }
+            
+            try {
+                if (!silentMode) {
+                    console.log(`📡 Importing all sold history for property ${propertyId}...`);
+                    showAlert('success', 'Fetching complete sold history... this may take a moment.');
+                }
+                
+                const response = await fetch('/internal-properties/process-sold', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -3060,7 +3279,7 @@
             try {
                 // Save to database if we have a search context
                 if (window.searchContext && window.searchContext.id) {
-                    const response = await fetch(`/api/saved-searches/${window.searchContext.id}`, {
+                    const response = await fetch(`/searchproperties/update/${window.searchContext.id}`, {
                         method: 'PUT',
                         headers: {
                             'Content-Type': 'application/json',
