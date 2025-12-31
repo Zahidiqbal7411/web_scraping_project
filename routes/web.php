@@ -35,7 +35,7 @@ Route::middleware('auth')->group(function () {
         Route::delete('/{id}', [SavedSearchController::class, 'destroy'])->name('destroy');
         Route::match(['post', 'put'], '/update/{id}', [SavedSearchController::class, 'update'])->name('update');
         Route::get('/areas', [SavedSearchController::class, 'getAreas'])->name('getAreas');
-        Route::get('/check-area', [SavedSearchController::class, 'checkArea'])->name('check-area');
+        Route::post('/check-area', [SavedSearchController::class, 'checkArea'])->name('check-area');
     });
 });
 

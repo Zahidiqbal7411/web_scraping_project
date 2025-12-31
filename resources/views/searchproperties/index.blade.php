@@ -1048,6 +1048,22 @@
             });
         }
 
+        // Safe URL parameter extractor (handles Rightmove URLs with ^ better than new URL())
+        function getParamFromUrl(url, param) {
+            if (!url) return null;
+            try {
+                // Try standard URL parsing first (for well-formed URLs)
+                const urlObj = new URL(url);
+                const val = urlObj.searchParams.get(param);
+                if (val !== null) return val;
+            } catch (e) {
+                // Fallback to regex for malformed URLs or those with ^
+            }
+            
+            const results = new RegExp('[?&]' + param + '=([^&#]*)').exec(url);
+            return results ? decodeURIComponent(results[1].replace(/\+/g, ' ')) : null;
+        }
+
         // Show Alert
         function showAlert(type, message) {
             const alert = type === 'success' ? successAlert : errorAlert;
@@ -1170,7 +1186,7 @@
                             headers: {
                                 'Content-Type': 'application/json',
                                 'Accept': 'application/json',
-                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content
                             },
                             body: JSON.stringify({ area: cleanNameForLookup })
                         });
@@ -1229,7 +1245,7 @@
                             headers: {
                                 'Content-Type': 'application/json',
                                 'Accept': 'application/json',
-                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content
                             },
                             body: JSON.stringify({ area: cleanName })
                         });
@@ -1270,7 +1286,7 @@
                     headers: {
                         'Content-Type': 'application/json',
                         'Accept': 'application/json',
-                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content
                     },
                     body: JSON.stringify({ 
                         updates_url: url,
@@ -1470,7 +1486,7 @@
                     headers: {
                         'Content-Type': 'application/json',
                         'Accept': 'application/json',
-                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content
                     },
                     body: JSON.stringify({ updates_url: newUrl })
                 });
@@ -1501,124 +1517,119 @@
                 return;
             }
 
-            // Reset form first to clear any previous data
-            resetForm();
-            
-            // Enable inputs for editing
-            enableFormInputs();
-
-            editSearchId.value = id;
-            modalTitle.textContent = 'Edit Search';
-            saveButtonText.textContent = 'Update Search';
-            
-            // Show Save button and Generate URL button for edit mode
-            saveSearchBtn.style.display = 'flex';
-            formVisitUrlBtn.style.display = 'none';
-            document.getElementById('generateUrlBtn').style.display = 'inline-flex';
-
-            // Parse URL to populate form
             try {
-                const urlObj = new URL(search.updates_url);
-                const params = new URLSearchParams(urlObj.search);
-
-                // Set area - prefer database value, then URL parsing
-                const locationId = params.get('locationIdentifier') || '';
-                const searchLocation = params.get('searchLocation') || '';
+                // Reset form first to clear any previous data
+                resetForm();
                 
-                // Use search.area from database first (most reliable)
-                if (search.area) {
-                    areaInput.value = search.area.replace(/\+/g, ' ');
-                    areaName.value = search.area.replace(/\+/g, ' ');
-                    // Try to find identifier from areaMapping
-                    const foundId = areaMapping[search.area] || areaMapping[search.area.replace(/\+/g, ' ')];
-                    if (foundId) {
-                        areaIdentifier.value = foundId;
-                    } else if (locationId) {
-                        areaIdentifier.value = locationId;
-                    }
-                } else if (locationId) {
-                    areaIdentifier.value = locationId;
-                    
-                    if (searchLocation) {
-                        areaName.value = searchLocation;
-                        areaInput.value = searchLocation;
-                    } else {
-                        // Reverse lookup from areaMapping
-                        const foundName = Object.keys(areaMapping).find(key => areaMapping[key] === locationId);
-                        if (foundName) {
-                            areaName.value = foundName;
-                            areaInput.value = foundName;
-                        } else {
-                            // If ID exists but name unknown, show the ID
-                            areaName.value = locationId;
-                            areaInput.value = locationId;
-                        }
-                    }
-                } else if (searchLocation) {
-                    areaInput.value = searchLocation;
-                    areaName.value = searchLocation;
+                // Enable inputs for editing
+                enableFormInputs();
+
+                editSearchId.value = id;
+                modalTitle.textContent = 'Edit Search';
+                saveButtonText.textContent = 'Update Search';
+                
+                // Show Save button and Generate URL button for edit mode
+                saveSearchBtn.style.display = 'flex';
+                formVisitUrlBtn.style.display = 'none';
+                document.getElementById('generateUrlBtn').style.display = 'inline-flex';
+
+                // Population with DB-first, URL-fallback strategy
+                const url = search.updates_url || '';
+                
+                // 1. Area
+                const dbArea = (search.area || '').replace(/\+/g, ' ');
+                const urlArea = getParamFromUrl(url, 'searchLocation');
+                const urlLocId = getParamFromUrl(url, 'locationIdentifier');
+                
+                areaInput.value = dbArea || urlArea || urlLocId || '';
+                areaName.value = dbArea || urlArea || urlLocId || '';
+                
+                // Try to find identifier
+                const foundId = areaMapping[areaInput.value] || urlLocId;
+                if (foundId) {
+                    areaIdentifier.value = foundId;
                 }
 
-                // Set prices
-                minPriceSelect.value = params.get('minPrice') || '';
-                maxPriceSelect.value = params.get('maxPrice') || '';
+                // 2. Prices
+                const minPrice = search.min_price || getParamFromUrl(url, 'minPrice');
+                const maxPrice = search.max_price || getParamFromUrl(url, 'maxPrice');
+                // Ensure we don't set '0' if it should be empty, and handle numeric strings
+                if (minPriceSelect) minPriceSelect.value = (minPrice && minPrice != '0' && minPrice != 'null') ? Math.round(parseFloat(minPrice)) : '';
+                if (maxPriceSelect) maxPriceSelect.value = (maxPrice && maxPrice != '0' && maxPrice != 'null') ? Math.round(parseFloat(maxPrice)) : '';
 
-                // Set bedrooms
-                minBedroomsSelect.value = params.get('minBedrooms') || '';
-                maxBedroomsSelect.value = params.get('maxBedrooms') || '';
+                // 3. Bedrooms
+                const minBed = search.min_bed || getParamFromUrl(url, 'minBedrooms');
+                const maxBed = search.max_bed || getParamFromUrl(url, 'maxBedrooms');
+                if (minBedroomsSelect) minBedroomsSelect.value = (minBed && minBed != 'null') ? minBed : '';
+                if (maxBedroomsSelect) maxBedroomsSelect.value = (maxBed && maxBed != 'null') ? maxBed : '';
 
-                // Set bathrooms
-                const minBathroomsSelect = document.getElementById('minBathrooms');
-                const maxBathroomsSelect = document.getElementById('maxBathrooms');
-                if (minBathroomsSelect) minBathroomsSelect.value = params.get('minBathrooms') || '';
-                if (maxBathroomsSelect) maxBathroomsSelect.value = params.get('maxBathrooms') || '';
+                // 4. Bathrooms
+                const minBath = search.min_bath || getParamFromUrl(url, 'minBathrooms');
+                const maxBath = search.max_bath || getParamFromUrl(url, 'maxBathrooms');
+                const minBathSelect = document.getElementById('minBathrooms');
+                const maxBathSelect = document.getElementById('maxBathrooms');
+                if (minBathSelect) minBathSelect.value = (minBath && minBath != 'null') ? minBath : '';
+                if (maxBathSelect) maxBathSelect.value = (maxBath && maxBath != 'null') ? maxBath : '';
 
-                // Set include SSTC
+                // 5. include SSTC
                 const includeSSTC = document.getElementById('includeSSTC');
-                if (includeSSTC) includeSSTC.checked = params.has('includeSSTC') || params.get('includeSSTC') === 'true';
+                if (includeSSTC) {
+                    const sstcVal = getParamFromUrl(url, 'includeSSTC');
+                    includeSSTC.checked = sstcVal === 'true' || url.includes('includeSSTC=true');
+                }
 
-                // Set property types
-                const propertyTypes = params.get('propertyTypes') || '';
-                const types = propertyTypes.split(',').filter(t => t);
+                // 6. Property Types
+                const dbTypes = search.property_type || '';
+                const urlTypes = getParamFromUrl(url, 'propertyTypes') || '';
+                const types = (dbTypes || urlTypes).split(',').filter(t => t);
                 document.querySelectorAll('input[name="propertyType"]').forEach(cb => {
                     cb.checked = types.includes(cb.value);
                 });
 
-                // Set date added
-                maxDaysSinceAddedSelect.value = params.get('maxDaysSinceAdded') || '';
+                // 7. Date Added
+                const dbDays = search.max_days_since_added;
+                const urlDays = getParamFromUrl(url, 'maxDaysSinceAdded');
+                if (maxDaysSinceAddedSelect) {
+                    maxDaysSinceAddedSelect.value = dbDays || urlDays || '';
+                }
 
-                // Set tenure types
-                const tenureTypes = params.get('tenureTypes') || '';
-                const tenures = tenureTypes.split(',').filter(t => t);
+                // 8. Tenure Types
+                const dbTenures = search.tenure_types || '';
+                const urlTenure = getParamFromUrl(url, 'tenure');
+                const urlTenureTypes = getParamFromUrl(url, 'tenureTypes');
+                const tenures = (dbTenures || urlTenure || urlTenureTypes || '').split(',').filter(t => t);
                 document.querySelectorAll('input[name="tenureType"]').forEach(cb => {
                     cb.checked = tenures.includes(cb.value);
                 });
 
-                // Set must haves
-                const mustHave = params.get('mustHave') || '';
-                const mustHaves = mustHave.split(',').filter(t => t);
+                // 9. Must Haves
+                const dbMust = search.must_have || '';
+                const urlMust = getParamFromUrl(url, 'mustHave');
+                const mustHaves = (dbMust || urlMust || '').split(',').filter(t => t);
                 document.querySelectorAll('input[name="mustHave"]').forEach(cb => {
                     cb.checked = mustHaves.includes(cb.value);
                 });
 
-                // Set don't show
-                const dontShow = params.get('dontShow') || '';
-                const dontShows = dontShow.split(',').filter(t => t);
+                // 10. Don't Show
+                const dbDont = search.dont_show || '';
+                const urlDont = getParamFromUrl(url, 'dontShow');
+                const dontShows = (dbDont || urlDont || '').split(',').filter(t => t);
                 document.querySelectorAll('input[name="dontShow"]').forEach(cb => {
                     cb.checked = dontShows.includes(cb.value);
                 });
 
-            } catch (e) {
-                console.error('Error parsing URL:', e);
-            }
+                // Populate the generated URL input with the existing URL
+                const generatedUrlInput = document.getElementById('generatedUrlInput');
+                if (generatedUrlInput) {
+                    generatedUrlInput.value = search.updates_url;
+                }
 
-            // Populate the generated URL input with the existing URL
-            const generatedUrlInput = document.getElementById('generatedUrlInput');
-            if (generatedUrlInput) {
-                generatedUrlInput.value = search.updates_url;
-            }
+                searchModal.classList.add('active');
 
-            searchModal.classList.add('active');
+            } catch (err) {
+                console.error('Error in editSearch:', err);
+                showAlert('error', 'Error populating search data: ' + err.message);
+            }
         };
 
         // View Search - populate form in read-only mode

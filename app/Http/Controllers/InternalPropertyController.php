@@ -94,7 +94,7 @@ class InternalPropertyController extends Controller
                 ->with([
                     'images:id,property_id,image_link',
                     'soldProperties' => function($q) {
-                        $q->select(['id', 'property_id', 'location', 'property_type', 'bedrooms', 'bathrooms', 'tenure', 'image_url']);
+                        $q->select(['id', 'property_id', 'location', 'property_type', 'bedrooms', 'bathrooms', 'tenure', 'image_url', 'map_url', 'detail_url']);
                     },
                     'soldProperties.prices:id,sold_property_id,sold_price,sold_date'
                 ])

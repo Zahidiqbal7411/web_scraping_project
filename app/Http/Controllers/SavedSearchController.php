@@ -32,74 +32,7 @@ class SavedSearchController extends Controller
         ]);
 
         $url = $validated['updates_url'];
-        
-        // Parse the URL parameters
-        $parsedUrl = parse_url($url);
-        $queryParams = [];
-        if (isset($parsedUrl['query'])) {
-            parse_str($parsedUrl['query'], $queryParams);
-        }
-
-        // Initialize data array with the URL
-        $data = [
-            'updates_url' => $url,
-            'area' => $request->input('area') // Get area directly from request
-        ];
-
-        // Map URL parameters to database fields
-        if (isset($queryParams['searchLocation']) && empty($data['area'])) {
-            $data['area'] = $queryParams['searchLocation'];
-        }
-        
-        if (isset($queryParams['minPrice'])) {
-            $data['min_price'] = $queryParams['minPrice'];
-        }
-        
-        if (isset($queryParams['maxPrice'])) {
-            $data['max_price'] = $queryParams['maxPrice'];
-        }
-        
-        if (isset($queryParams['minBedrooms'])) {
-            $data['min_bed'] = $queryParams['minBedrooms'];
-        }
-        
-        if (isset($queryParams['maxBedrooms'])) {
-            $data['max_bed'] = $queryParams['maxBedrooms'];
-        }
-
-        // Check for bathrooms (though not always in URL)
-        if (isset($queryParams['minBathrooms'])) {
-            $data['min_bath'] = $queryParams['minBathrooms'];
-        }
-        
-        if (isset($queryParams['maxBathrooms'])) {
-            $data['max_bath'] = $queryParams['maxBathrooms'];
-        }
-
-        if (isset($queryParams['propertyTypes'])) {
-            $data['property_type'] = $queryParams['propertyTypes'];
-        }
-
-        if (isset($queryParams['tenure'])) {
-            $data['tenure_types'] = $queryParams['tenure'];
-        }
-
-        if (isset($queryParams['maxDaysSinceAdded'])) {
-            $data['max_days_since_added'] = $queryParams['maxDaysSinceAdded'];
-        }
-
-        // Parse new filters
-        if (isset($queryParams['tenureTypes'])) {
-            $data['tenure_types'] = $queryParams['tenureTypes'];
-        }
-
-        if (isset($queryParams['mustHave'])) {
-            $data['must_have'] = $queryParams['mustHave'];
-        }
-
-        if (isset($queryParams['dontShow'])) {
-            $data['dont_show'] = $queryParams['dont_show'] ?? $queryParams['dontShow'];
-        }
+        $data = $this->parseUrlToData($url, $request->input('area'));
 
         $search = SavedSearch::create($data);
 
@@ -108,6 +41,44 @@ class SavedSearchController extends Controller
             'message' => 'Search saved successfully',
             'search' => $search
         ]);
+    }
+
+    private function parseUrlToData($url, $areaInput = null)
+    {
+        return [
+            'updates_url' => $url,
+            'area' => $areaInput ?? $this->getParamFromUrl($url, 'searchLocation') ?? $this->getParamFromUrl($url, 'locationIdentifier'),
+            'min_price' => $this->getParamFromUrl($url, 'minPrice'),
+            'max_price' => $this->getParamFromUrl($url, 'maxPrice'),
+            'min_bed' => $this->getParamFromUrl($url, 'minBedrooms'),
+            'max_bed' => $this->getParamFromUrl($url, 'maxBedrooms'),
+            'min_bath' => $this->getParamFromUrl($url, 'minBathrooms'),
+            'max_bath' => $this->getParamFromUrl($url, 'maxBathrooms'),
+            'property_type' => $this->getParamFromUrl($url, 'propertyTypes'),
+            'tenure_types' => $this->getParamFromUrl($url, 'tenureTypes') ?? $this->getParamFromUrl($url, 'tenure'),
+            'max_days_since_added' => $this->getParamFromUrl($url, 'maxDaysSinceAdded'),
+            'must_have' => $this->getParamFromUrl($url, 'mustHave'),
+            'dont_show' => $this->getParamFromUrl($url, 'dontShow') ?? $this->getParamFromUrl($url, 'dont_show'),
+        ];
+    }
+
+    private function getParamFromUrl($url, $param)
+    {
+        if (empty($url)) return null;
+        
+        // Try standard parsing first
+        $query = parse_url($url, PHP_URL_QUERY);
+        if ($query) {
+            parse_str($query, $params);
+            if (isset($params[$param])) return $params[$param];
+        }
+
+        // Fallback to regex for cases where parse_url might fail (e.g. invalid syntax in Rightmove URL)
+        if (preg_match('/[?&]' . preg_quote($param, '/') . '=([^&#]*)/', $url, $matches)) {
+            return urldecode($matches[1]);
+        }
+
+        return null;
     }
 
     public function destroy($id)
@@ -135,68 +106,11 @@ class SavedSearchController extends Controller
 
         $url = $validated['updates_url'];
         
-        // Parse the URL parameters
-        $parsedUrl = parse_url($url);
-        $queryParams = [];
-        if (isset($parsedUrl['query'])) {
-            parse_str($parsedUrl['query'], $queryParams);
-        }
-
-        // Update data
-        $search->updates_url = $url;
-        
         // Delete old URLs associated with this search since the URL/criteria changed
         Url::where('filter_id', $id)->delete();
-        if ($request->has('area')) {
-            $search->area = $request->input('area');
-        }
-        
-        if (isset($queryParams['searchLocation']) && !$request->has('area')) {
-            $search->area = $queryParams['searchLocation'];
-        }
-        
-        if (isset($queryParams['minPrice'])) {
-            $search->min_price = $queryParams['minPrice'];
-        }
-        
-        if (isset($queryParams['maxPrice'])) {
-            $search->max_price = $queryParams['maxPrice'];
-        }
-        
-        if (isset($queryParams['minBedrooms'])) {
-            $search->min_bed = $queryParams['minBedrooms'];
-        }
-        
-        if (isset($queryParams['maxBedrooms'])) {
-            $search->max_bed = $queryParams['maxBedrooms'];
-        }
 
-        if (isset($queryParams['propertyTypes'])) {
-            $search->property_type = $queryParams['propertyTypes'];
-        }
-
-        if (isset($queryParams['tenure'])) {
-            $search->tenure_types = $queryParams['tenure'];
-        }
-
-        if (isset($queryParams['maxDaysSinceAdded'])) {
-            $search->max_days_since_added = $queryParams['maxDaysSinceAdded'];
-        }
-
-        // Parse new filters
-        if (isset($queryParams['tenureTypes'])) {
-            $search->tenure_types = $queryParams['tenureTypes'];
-        }
-
-        if (isset($queryParams['mustHave'])) {
-            $search->must_have = $queryParams['mustHave'];
-        }
-
-        if (isset($queryParams['dontShow'])) {
-            $search->dont_show = $queryParams['dont_show'] ?? $queryParams['dontShow'];
-        }
-
-        $search->save();
+        $data = $this->parseUrlToData($url, $request->input('area'));
+        $search->update($data);
 
         return response()->json([
             'success' => true,

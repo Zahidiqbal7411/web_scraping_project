@@ -2838,11 +2838,13 @@
                                                          imgUrl.includes('noimage') ||
                                                          imgUrl.includes('notavailable') ||
                                                          imgUrl.includes('loading') ||
-                                                         imgUrl.includes('no_image') || // Added common variants
+                                                         imgUrl.includes('no_image') || 
                                                          imgUrl.includes('empty') ||
+                                                         imgUrl.includes('media-not-available') || // Added common variant
+                                                         imgUrl.includes('rightmove.co.uk/no-photo') || // Specific Rightmove variant
                                                          imgUrl.length < 15;
                                                          
-                                    // Use map automatically if detected placeholder
+                                    // Use map automatically if detected placeholder, fallback to placeholder if no map
                                     const soldPhoto = (isPlaceholder && sold.map_url) ? sold.map_url : (sold.image_url || sold.map_url || 'https://via.placeholder.com/260x180/eee/999?text=No+Photo');
                                     
                                     if (isPlaceholder && sold.map_url) {
@@ -2859,7 +2861,8 @@
                                                      class="sold-img"
                                                      data-map="${sold.map_url || ''}"
                                                      onerror="handleSoldImageError(this)">
-                                            </div>
+                  
+                                                     </div>
                                             <div class="sold-property-main">
                                                 <div class="sold-property-type">
                                                     ${sold.property_type || 'Property'} (${sold.tenure || 'Unknown'})
