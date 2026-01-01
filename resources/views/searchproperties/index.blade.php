@@ -762,7 +762,26 @@
 
         <!-- Saved Searches Table Card -->
         <div class="card">
-            <h2 class="card-title">Your Saved Searches</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;">
+                <h2 class="card-title" style="margin-bottom: 0;">Your Saved Searches</h2>
+                <div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
+                    <!-- Search by Location -->
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <label for="locationSearch" style="font-size: 0.875rem; font-weight: 500; color: var(--text-secondary);">Search:</label>
+                        <input type="text" id="locationSearch" class="form-control" placeholder="Filter by location..." style="width: 200px; padding: 0.5rem 0.75rem;">
+                    </div>
+                    <!-- Per Page Selector -->
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <label for="perPageSelect" style="font-size: 0.875rem; font-weight: 500; color: var(--text-secondary);">Show:</label>
+                        <select id="perPageSelect" class="form-control" style="width: auto; padding: 0.5rem 0.75rem;">
+                            <option value="10">10</option>
+                            <option value="25">25</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
             <div class="table-wrapper">
                 <table>
                     <thead>
@@ -783,6 +802,27 @@
                         </tr>
                     </tbody>
                 </table>
+            </div>
+            <!-- Pagination Controls -->
+            <div id="paginationControls" style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--card-border); flex-wrap: wrap; gap: 0.75rem;">
+                <div id="paginationInfo" style="font-size: 0.875rem; color: var(--text-secondary);">
+                    Showing 0 of 0 results
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <button type="button" id="prevPageBtn" class="btn btn-sm" style="background: var(--text-secondary); color: white;" disabled>
+                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align: middle;">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+                        </svg>
+                        Previous
+                    </button>
+                    <span id="pageIndicator" style="font-size: 0.875rem; color: var(--text-primary); padding: 0 0.5rem;">Page 1 of 1</span>
+                    <button type="button" id="nextPageBtn" class="btn btn-sm" style="background: var(--text-secondary); color: white;" disabled>
+                        Next
+                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align: middle;">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                        </svg>
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -863,6 +903,16 @@
 @section('scripts')
 
     <script>
+        // CSRF Token Helper - Get the CSRF token from meta tag
+        function getCsrfToken() {
+            const meta = document.querySelector('meta[name="csrf-token"]');
+            if (!meta) {
+                console.error('CSRF token meta tag not found!');
+                return '';
+            }
+            return meta.getAttribute('content') || meta.content || '';
+        }
+
         // Elements
         const saveSearchBtn = document.getElementById('saveSearchBtn');
         const saveButtonText = document.getElementById('saveButtonText');
@@ -1181,12 +1231,12 @@
                     const cleanNameForLookup = locationName.split(',')[0].trim();
                     
                     try {
-                        const response = await fetch('/searchproperties/check-area', {
+                        const response = await fetch("{{ route('searchproperties.check-area', [], false) }}", {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
                                 'Accept': 'application/json',
-                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content
+                                'X-CSRF-TOKEN': getCsrfToken()
                             },
                             body: JSON.stringify({ area: cleanNameForLookup })
                         });
@@ -1215,8 +1265,17 @@
             }
         });
 
-        // Load Searches on Page Load
-        document.addEventListener('DOMContentLoaded', loadSearches);
+        // Initial load
+        function initApp() {
+            console.log('Initializing app...');
+            loadSearches(1);
+        }
+
+        if (document.readyState === 'complete' || document.readyState === 'interactive') {
+            initApp();
+        } else {
+            document.addEventListener('DOMContentLoaded', initApp);
+        }
 
         // Save/Update Search
         saveSearchBtn.addEventListener('click', async () => {
@@ -1240,12 +1299,12 @@
                     // Try to fetch identifier silently if missing
                     if (!areaIdentifier.value) {
                         const cleanName = locationName.split(',')[0].trim();
-                        const response = await fetch('/searchproperties/check-area', {
+                        const response = await fetch("{{ route('searchproperties.check-area', [], false) }}", {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
                                 'Accept': 'application/json',
-                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content
+                                'X-CSRF-TOKEN': getCsrfToken()
                             },
                             body: JSON.stringify({ area: cleanName })
                         });
@@ -1278,7 +1337,7 @@
             saveSearchBtn.innerHTML = '<span class="spinner"></span> Saving...';
 
             try {
-                const endpoint = isEdit ? `/searchproperties/update/${editSearchId.value}` : '/searchproperties/store';
+                const endpoint = isEdit ? `{{ url('searchproperties/update', [], false) }}/${editSearchId.value}` : "{{ route('searchproperties.store', [], false) }}";
                 const method = isEdit ? 'PUT' : 'POST';
 
                 const response = await fetch(endpoint, {
@@ -1286,7 +1345,7 @@
                     headers: {
                         'Content-Type': 'application/json',
                         'Accept': 'application/json',
-                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content
+                        'X-CSRF-TOKEN': getCsrfToken()
                     },
                     body: JSON.stringify({ 
                         updates_url: url,
@@ -1311,12 +1370,41 @@
             }
         });
 
-        // Load Searches
-        async function loadSearches() {
+        // Pagination State
+        let currentPage = 1;
+        let perPage = 10;
+        let searchQuery = '';
+        let paginationData = null;
+
+        // Pagination Elements
+        const locationSearchInput = document.getElementById('locationSearch');
+        const perPageSelect = document.getElementById('perPageSelect');
+        const prevPageBtn = document.getElementById('prevPageBtn');
+        const nextPageBtn = document.getElementById('nextPageBtn');
+        const pageIndicator = document.getElementById('pageIndicator');
+        const paginationInfo = document.getElementById('paginationInfo');
+
+        // Load Searches with Pagination
+        async function loadSearches(page = 1) {
+            // Ensure we have a valid page number
+            page = parseInt(page, 10) || 1;
+            console.log('loadSearches requested page:', page, 'current state:', { currentPage, searchQuery, perPage });
+            
+            currentPage = page;
             searchesBody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:2rem;">Loading...</td></tr>';
 
             try {
-                const response = await fetch('/searchproperties/all', {
+                const params = new URLSearchParams({
+                    page: parseInt(currentPage, 10) || 1,
+                    per_page: parseInt(perPage, 10) || 10
+                });
+                
+                if (searchQuery) {
+                    params.append('search', searchQuery);
+                }
+
+                const endpoint = "{{ route('searchproperties.all', [], false) }}";
+                const response = await fetch(endpoint + "?" + params.toString(), {
                     headers: {
                         'Accept': 'application/json'
                     }
@@ -1324,12 +1412,26 @@
                 const data = await response.json();
 
                 if (data.success && data.searches) {
+                    paginationData = data.pagination;
+                    
+                    // Sync our local state with what the server returned
+                    if (data.pagination) {
+                        currentPage = parseInt(data.pagination.current_page, 10) || currentPage;
+                        perPage = parseInt(data.pagination.per_page, 10) || perPage;
+                    }
+
+                    console.log('Pagination data received:', paginationData);
+                    updatePaginationUI();
+
                     if (data.searches.length === 0) {
+                        const emptyMessage = searchQuery 
+                            ? `No searches found for "${searchQuery}"` 
+                            : 'No saved searches yet';
                         searchesBody.innerHTML = `
                             <tr>
                                 <td colspan="5" class="empty-state">
                                     <div class="empty-icon">📋</div>
-                                    <p>No saved searches yet</p>
+                                    <p>${emptyMessage}</p>
                                     <p class="text-muted" style="font-size: 0.875rem;">Click "Add New Search" to create one</p>
                                 </td>
                             </tr>
@@ -1358,7 +1460,7 @@
                                 <td class="text-muted">${minPrice} - ${maxPrice}</td>
                                 <td class="text-muted">${minBed} - ${maxBed} Beds</td>
                                 <td class="text-muted capitalize">
-                                    <a href="/internal-properties/search/${search.id}" class="btn btn-sm" style="background: var(--primary); color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
+                                    <a href="{{ url('internal-properties/search', [], false) }}/${search.id}" class="btn btn-sm" style="background: var(--primary); color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
                                         <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
                                         Property Details
                                     </a>
@@ -1380,6 +1482,84 @@
                 console.error(error);
                 searchesBody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:2rem;color:var(--error);">Error loading searches</td></tr>';
             }
+        }
+
+        // Update Pagination UI
+        function updatePaginationUI() {
+            if (!paginationData) {
+                console.log('updatePaginationUI: paginationData is null, skipping');
+                return;
+            }
+
+            const { current_page, last_page, per_page, total, has_more_pages, has_previous_page } = paginationData;
+            
+            console.log('updatePaginationUI:', { current_page, last_page, has_more_pages, has_previous_page });
+            
+            // Update page indicator
+            pageIndicator.textContent = `Page ${current_page} of ${last_page}`;
+            
+            // Update pagination info
+            const start = total === 0 ? 0 : (current_page - 1) * per_page + 1;
+            const end = Math.min(current_page * per_page, total);
+            paginationInfo.textContent = `Showing ${start}-${end} of ${total} results`;
+            
+            // Update button states
+            prevPageBtn.disabled = !has_previous_page;
+            nextPageBtn.disabled = !has_more_pages;
+            
+            console.log('Button states - nextPageBtn.disabled:', nextPageBtn.disabled, 'prevPageBtn.disabled:', prevPageBtn.disabled);
+            
+            // Update button styles based on state
+            prevPageBtn.style.opacity = has_previous_page ? '1' : '0.5';
+            nextPageBtn.style.opacity = has_more_pages ? '1' : '0.5';
+        }
+
+        // Search Input Handler (debounced)
+        let searchTimeout;
+        locationSearchInput.addEventListener('input', (e) => {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                searchQuery = e.target.value.trim();
+                currentPage = 1; // Reset to first page on new search
+                loadSearches(1);
+            }, 300);
+        });
+
+        // Per Page Selector Handler
+        perPageSelect.addEventListener('change', (e) => {
+            perPage = parseInt(e.target.value);
+            currentPage = 1; // Reset to first page when changing per_page
+            loadSearches(1);
+        });
+
+        // Previous Page Button Handler
+        if (prevPageBtn) {
+            prevPageBtn.addEventListener('click', () => {
+                const targetPage = (parseInt(currentPage, 10) || 1) - 1;
+                console.log('Previous button clicked', { currentPage, targetPage, paginationData });
+                if (paginationData && paginationData.has_previous_page) {
+                    loadSearches(targetPage);
+                } else {
+                    console.log('Previous navigation blocked - no previous page');
+                }
+            });
+        } else {
+            console.error('prevPageBtn element not found');
+        }
+
+        // Next Page Button Handler
+        if (nextPageBtn) {
+            nextPageBtn.addEventListener('click', () => {
+                const targetPage = (parseInt(currentPage, 10) || 1) + 1;
+                console.log('Next button clicked', { currentPage, targetPage, paginationData });
+                if (paginationData && paginationData.has_more_pages) {
+                    loadSearches(targetPage);
+                } else {
+                    console.log('Next navigation blocked - no more pages or paginationData is null');
+                }
+            });
+        } else {
+            console.error('nextPageBtn element not found');
         }
 
         // Property Type Modal Elements
@@ -1481,12 +1661,12 @@
             updateUrlBtn.textContent = 'Updating...';
 
             try {
-                const response = await fetch(`/searchproperties/update/${searchId}`, {
+                const response = await fetch(`{{ url('searchproperties/update') }}/${searchId}`, {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
                         'Accept': 'application/json',
-                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content
+                        'X-CSRF-TOKEN': getCsrfToken()
                     },
                     body: JSON.stringify({ updates_url: newUrl })
                 });
@@ -1671,7 +1851,7 @@
                     viewResultsBtn.innerHTML = '<svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg> View Results';
                     document.querySelector('.form-actions').prepend(viewResultsBtn);
                 }
-                viewResultsBtn.href = `/internal-properties/search/${id}`;
+                viewResultsBtn.href = `{{ url('internal-properties/search', [], false) }}/${id}`;
                 viewResultsBtn.style.display = 'inline-flex';
             } else {
                 formVisitUrlBtn.style.display = 'none';
@@ -1686,6 +1866,9 @@
         function resetFormWithCleanup() {
             originalResetForm();
             cancelModalBtn.textContent = 'Cancel';
+            // Reset modal title and button text to create mode
+            modalTitle.textContent = 'Create New Search';
+            saveButtonText.textContent = 'Save Search';
             const viewResultsBtn = document.getElementById('modalViewResultsBtn');
             if (viewResultsBtn) viewResultsBtn.style.display = 'none';
         }
@@ -1725,10 +1908,10 @@
             confirmDeleteBtn.textContent = 'Deleting...';
 
             try {
-                const response = await fetch(`/searchproperties/${id}`, {
+                const response = await fetch(`{{ url('searchproperties', [], false) }}/${id}`, {
                     method: 'DELETE',
                     headers: {
-                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                        'X-CSRF-TOKEN': getCsrfToken()
                     }
                 });
                 

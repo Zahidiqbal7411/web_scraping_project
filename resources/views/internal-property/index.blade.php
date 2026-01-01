@@ -1951,7 +1951,28 @@
                 
                 if (!urlsResponse.ok) {
                     const errorText = await urlsResponse.text().catch(() => 'Unknown error');
-                    throw new Error(`HTTP error ${urlsResponse.status}: ${errorText.substring(0, 200)}`);
+                    
+                    // Try to parse JSON error response first
+                    let errorMessage = `Server error (${urlsResponse.status})`;
+                    try {
+                        const errorJson = JSON.parse(errorText);
+                        errorMessage = errorJson.message || errorJson.error || errorMessage;
+                    } catch (e) {
+                        // If HTML response, try to extract title or show generic message
+                        if (errorText.includes('<!DOCTYPE') || errorText.includes('<html')) {
+                            const titleMatch = errorText.match(/<title[^>]*>([^<]+)<\/title>/i);
+                            if (titleMatch) {
+                                errorMessage = `Server error: ${titleMatch[1].trim()}`;
+                            } else {
+                                errorMessage = `Server error (${urlsResponse.status}): An internal server error occurred. Please check Laravel logs for details.`;
+                            }
+                        } else {
+                            // Plain text error
+                            errorMessage = errorText.substring(0, 150);
+                        }
+                    }
+                    
+                    throw new Error(errorMessage);
                 }
                 
                 let urlsData;

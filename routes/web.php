@@ -10,8 +10,10 @@ Route::middleware('auth')->group(function () {
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 
-    // Home Page - Property Listing
-    Route::get('/', [InternalPropertyController::class, 'index'])->name('dashboard');
+    // Home Page - Welcome Dashboard
+    Route::get('/', function () {
+        return view('welcome');
+    })->name('dashboard');
     Route::get('/internal-property', [InternalPropertyController::class, 'index'])->name('internal-property.index');
     Route::get('/internal-property/{id}', [InternalPropertyController::class, 'show'])->name('internal-property.show');
 

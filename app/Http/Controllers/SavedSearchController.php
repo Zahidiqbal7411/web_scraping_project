@@ -17,11 +17,30 @@ class SavedSearchController extends Controller
         return view('searchproperties.index');
     }
 
-    public function index()
+    public function index(Request $request)
     {
+        $query = SavedSearch::query();
+        
+        // Search by location/area
+        if ($request->has('search') && $request->search !== '') {
+            $query->where('area', 'LIKE', '%' . $request->search . '%');
+        }
+        
+        // Paginate results (default 10 per page, max 100)
+        $perPage = min(max((int) $request->input('per_page', 10), 10), 100);
+        $searches = $query->latest()->paginate($perPage);
+        
         return response()->json([
             'success' => true,
-            'searches' => SavedSearch::latest()->get()
+            'searches' => $searches->items(),
+            'pagination' => [
+                'current_page' => $searches->currentPage(),
+                'last_page' => $searches->lastPage(),
+                'per_page' => $searches->perPage(),
+                'total' => $searches->total(),
+                'has_more_pages' => $searches->hasMorePages(),
+                'has_previous_page' => $searches->currentPage() > 1,
+            ]
         ]);
     }
 
