@@ -51,7 +51,7 @@ class SavedSearchController extends Controller
         ]);
 
         $url = $validated['updates_url'];
-        $data = $this->parseUrlToData($url, $request->input('area'));
+        $data = $this->parseUrlToData($url, $request->all());
 
         $search = SavedSearch::create($data);
 
@@ -62,11 +62,11 @@ class SavedSearchController extends Controller
         ]);
     }
 
-    private function parseUrlToData($url, $areaInput = null)
+    private function parseUrlToData($url, $requestData = [])
     {
-        return [
+        $data = [
             'updates_url' => $url,
-            'area' => $areaInput ?? $this->getParamFromUrl($url, 'searchLocation') ?? $this->getParamFromUrl($url, 'locationIdentifier'),
+            'area' => $this->getParamFromUrl($url, 'searchLocation') ?? $this->getParamFromUrl($url, 'locationIdentifier'),
             'min_price' => $this->getParamFromUrl($url, 'minPrice'),
             'max_price' => $this->getParamFromUrl($url, 'maxPrice'),
             'min_bed' => $this->getParamFromUrl($url, 'minBedrooms'),
@@ -78,7 +78,23 @@ class SavedSearchController extends Controller
             'max_days_since_added' => $this->getParamFromUrl($url, 'maxDaysSinceAdded'),
             'must_have' => $this->getParamFromUrl($url, 'mustHave'),
             'dont_show' => $this->getParamFromUrl($url, 'dontShow') ?? $this->getParamFromUrl($url, 'dont_show'),
+            'include_sstc' => $this->getParamFromUrl($url, 'includeSSTC') === 'true' || strpos($url, 'includeSSTC=true') !== false,
         ];
+
+        // Preference to explicit request data if provided
+        $explicitFields = [
+            'area', 'min_price', 'max_price', 'min_bed', 'max_bed', 
+            'min_bath', 'max_bath', 'property_type', 'tenure_types', 
+            'must_have', 'dont_show', 'max_days_since_added', 'include_sstc'
+        ];
+
+        foreach ($explicitFields as $field) {
+            if (isset($requestData[$field]) && $requestData[$field] !== null && $requestData[$field] !== '') {
+                $data[$field] = $requestData[$field];
+            }
+        }
+
+        return $data;
     }
 
     private function getParamFromUrl($url, $param)
@@ -102,14 +118,28 @@ class SavedSearchController extends Controller
 
     public function destroy($id)
     {
-        $search = SavedSearch::find($id);
-        if ($search) {
-            $search->delete();
-            // Delete associated URLs
-            Url::where('filter_id', $id)->delete();
-            return response()->json(['success' => true, 'message' => 'Search deleted']);
+        try {
+            $search = SavedSearch::find($id);
+            if ($search) {
+                // Delete associated URLs first to avoid constraints/orphans
+                try {
+                    Url::where('filter_id', $id)->delete();
+                } catch (\Exception $e) {
+                    Log::warning("Failed to clear URLs for search {$id}: " . $e->getMessage());
+                    // Continue to delete search anyway
+                }
+                
+                $search->delete();
+                return response()->json(['success' => true, 'message' => 'Search deleted successfully']);
+            }
+            return response()->json(['success' => false, 'message' => 'Search not found'], 404);
+        } catch (\Exception $e) {
+            Log::error("Error deleting search {$id}: " . $e->getMessage());
+            return response()->json([
+                'success' => false, 
+                'message' => 'Server error deleting search: ' . $e->getMessage()
+            ], 500);
         }
-        return response()->json(['success' => false, 'message' => 'Search not found'], 404);
     }
 
     public function update(Request $request, $id)
@@ -128,7 +158,7 @@ class SavedSearchController extends Controller
         // Delete old URLs associated with this search since the URL/criteria changed
         Url::where('filter_id', $id)->delete();
 
-        $data = $this->parseUrlToData($url, $request->input('area'));
+        $data = $this->parseUrlToData($url, $request->all());
         $search->update($data);
 
         return response()->json([

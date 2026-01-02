@@ -20,5 +20,6 @@ class SavedSearch extends Model
         'dont_show',
         'updates_url',
         'max_days_since_added',
+        'include_sstc',
     ];
 }

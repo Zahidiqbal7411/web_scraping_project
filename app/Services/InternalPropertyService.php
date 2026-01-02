@@ -12,7 +12,8 @@ use Illuminate\Support\Facades\Cache;
 class InternalPropertyService
 {
     private $client;
-    private $maxConcurrent = 30; // Process 30 properties simultaneously for faster loading
+    private $maxConcurrent = 10; // REDUCED: Process 10 properties simultaneously to avoid rate limiting
+    private $maxRetries = 20; // NEW: Maximum retry attempts for failed requests
     private $cacheEnabled = true;
     private $cacheDuration = 3600; // 1 hour cache
 
@@ -20,8 +21,8 @@ class InternalPropertyService
     {
         $this->client = new Client([
             'verify' => false,
-            'timeout' => 30,
-            'connect_timeout' => 15,
+            'timeout' => 80, // INCREASED: 60 seconds for slower responses
+            'connect_timeout' => 60, // INCREASED: 30 seconds for connection
             'headers' => [
                 'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -124,28 +125,8 @@ class InternalPropertyService
                     }
                 }
                 
-                // Create async promise
-                $promises[$urlKey] = $this->client->getAsync($propertyUrl)
-                    ->then(
-                        function ($response) use ($propertyUrl, $urlData, $urlKey) {
-                            return [
-                                'success' => true,
-                                'url' => $propertyUrl,
-                                'html' => $response->getBody()->getContents(),
-                                'urlKey' => $urlKey,
-                                'urlData' => $urlData
-                            ];
-                        },
-                        function (RequestException $e) use ($propertyUrl, $urlKey) {
-                            Log::warning("Failed to fetch property {$propertyUrl}: " . $e->getMessage());
-                            return [
-                                'success' => false,
-                                'url' => $propertyUrl,
-                                'error' => $e->getMessage(),
-                                'urlKey' => $urlKey
-                            ];
-                        }
-                    );
+                // Create async promise WITH RETRY LOGIC
+                $promises[$urlKey] = $this->fetchPropertyWithRetry($propertyUrl, $urlData, $urlKey);
             }
             
             // Wait for all promises in this chunk to complete
@@ -184,9 +165,14 @@ class InternalPropertyService
                 }
             }
             
-            // Small delay between chunks to be respectful
+            // INCREASED delay between chunks to avoid rate limiting
             if ($chunkIndex < count($chunks) - 1) {
-                usleep(100000); // 0.1 second delay - reduced for faster processing
+                usleep(500000); // 0.5 second delay - more respectful to prevent blocking
+            }
+            
+            // Log progress every 10 chunks for debugging
+            if (($chunkIndex + 1) % 10 === 0 || $chunkIndex === count($chunks) - 1) {
+                Log::info("Progress: Processed chunk " . ($chunkIndex + 1) . "/" . count($chunks) . " | Success: {$processed} | Failed: {$failed}");
             }
         }
         
@@ -195,6 +181,74 @@ class InternalPropertyService
             'processed' => $processed,
             'failed' => $failed
         ];
+    }
+    
+    /**
+     * Fetch property with retry logic and exponential backoff
+     * 
+     * @param string $propertyUrl The property URL to fetch
+     * @param array $urlData Original URL data
+     * @param mixed $urlKey URL identifier
+     * @return \GuzzleHttp\Promise\PromiseInterface
+     */
+    private function fetchPropertyWithRetry($propertyUrl, $urlData, $urlKey)
+    {
+        $attempt = 0;
+        
+        $retryPromise = function() use (&$retryPromise, &$attempt, $propertyUrl, $urlData, $urlKey) {
+            $attempt++;
+            
+            return $this->client->getAsync($propertyUrl)
+                ->then(
+                    function ($response) use ($propertyUrl, $urlData, $urlKey) {
+                        return [
+                            'success' => true,
+                            'url' => $propertyUrl,
+                            'html' => $response->getBody()->getContents(),
+                            'urlKey' => $urlKey,
+                            'urlData' => $urlData
+                        ];
+                    },
+                    function (RequestException $e) use (&$retryPromise, &$attempt, $propertyUrl, $urlKey) {
+                        $statusCode = $e->hasResponse() ? $e->getResponse()->getStatusCode() : null;
+                        
+                        // Check if we should retry
+                        $shouldRetry = $attempt < $this->maxRetries;
+                        
+                        // Detect rate limiting
+                        $isRateLimited = in_array($statusCode, [429, 403]);
+                        
+                        if ($shouldRetry) {
+                            // Exponential backoff: 1s, 2s, 4s
+                            $delay = pow(2, $attempt - 1);
+                            
+                            // If rate limited, add extra delay
+                            if ($isRateLimited) {
+                                $delay *= 2;
+                                Log::warning("Rate limit detected (HTTP {$statusCode}) for {$propertyUrl}. Retry {$attempt}/{$this->maxRetries} after {$delay}s");
+                            } else {
+                                Log::info("Retry {$attempt}/{$this->maxRetries} for {$propertyUrl} after {$delay}s: " . $e->getMessage());
+                            }
+                            
+                            // Wait and retry
+                            sleep($delay);
+                            return $retryPromise();
+                        }
+                        
+                        // Max retries exceeded
+                        Log::error("Failed to fetch property {$propertyUrl} after {$this->maxRetries} attempts: " . $e->getMessage());
+                        return [
+                            'success' => false,
+                            'url' => $propertyUrl,
+                            'error' => $e->getMessage(),
+                            'status_code' => $statusCode,
+                            'urlKey' => $urlKey
+                        ];
+                    }
+                );
+        };
+        
+        return $retryPromise();
     }
     
     /**
@@ -568,7 +622,7 @@ class InternalPropertyService
             Log::info("Scraping sold properties from: {$url}");
             
             $allSoldProperties = [];
-            $maxPages = 10; // Scrape up to 10 pages (should be enough for most properties)
+            $maxPages = 100; // INCREASED: Allow scraping up to 100 pages for complete history
             
             // Paginate through all pages using pageNumber parameter
             for ($currentPage = 1; $currentPage <= $maxPages; $currentPage++) {
@@ -696,8 +750,8 @@ class InternalPropertyService
                              'bedrooms' => $result['bedrooms'] ?? null,
                              'bathrooms' => $result['bathrooms'] ?? null,
                              'tenure' => $tenure,
-                            'image_url' => $result['imageInfo']['mediumImageUrl'] ?? $result['imageInfo']['imageUrl'] ?? null,
-                            'map_url' => $result['staticMapUrls']['staticMapImgUrlDesktop'] ?? null,
+                            'image_url' => $result['imageInfo']['mediumImageUrl'] ?? $result['imageInfo']['imageUrl'] ?? $result['image']['srcUrl'] ?? $result['image']['url'] ?? $result['mainImageSrc'] ?? $result['propertyImages'][0]['url'] ?? $result['propertyImages'][0] ?? null,
+                            'map_url' => $result['staticMapUrls']['staticMapImgUrlDesktop'] ?? $result['staticMapUrls']['desktop'] ?? $result['staticMapUrl'] ?? $result['mapUrl'] ?? null,
                             'detail_url' => $detailUrl,
                              'transactions' => []
                          ];

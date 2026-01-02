@@ -54,11 +54,11 @@ class InternalPropertyController extends Controller
         try {
             set_time_limit(300); // 5 minutes for large datasets
             
-            $searchId = $request->input('search_id');
-            $page = $request->input('page', 1);
-            $perPage = $request->input('per_page', 200); // Increased to 200 for faster loading
-            
-            Log::info("loadPropertiesFromDatabase: search_id=" . ($searchId ?? 'all') . ", page={$page}, per_page={$perPage}");
+        $searchId = $request->input('search_id');
+        $page = $request->input('page', 1);
+        $perPage = $request->input('per_page', 999999); // SET TO UNLIMITED (effectively)
+        
+        Log::info("loadPropertiesFromDatabase: search_id=" . ($searchId ?? 'all') . ", page={$page}, per_page={$perPage}");
             
             // Build query for properties
             $query = \App\Models\Property::query();
@@ -69,6 +69,7 @@ class InternalPropertyController extends Controller
             
             // Get total count before pagination
             $totalCount = $query->count();
+            Log::info("loadPropertiesFromDatabase: Total matching properties found: {$totalCount}");
             
             if ($totalCount === 0) {
                 return response()->json([
@@ -517,10 +518,21 @@ class InternalPropertyController extends Controller
                     Log::info("Performing scoped deletion for filter_id: " . ($searchId ?? 'NULL'));
                     
                     // 1. Delete URLs for this filter
-                    \App\Models\Url::where('filter_id', $searchId)->delete();
+                    if ($searchId) {
+                        \App\Models\Url::where('filter_id', $searchId)->delete();
+                    } else {
+                        // If no searchId, only delete URLs that also have no filter_id
+                        \App\Models\Url::whereNull('filter_id')->delete();
+                    }
                     
                     // 2. Find properties for this filter to clean up related data
-                    $propertyIds = \App\Models\Property::where('filter_id', $searchId)->pluck('id');
+                    $propQuery = \App\Models\Property::query();
+                    if ($searchId) {
+                        $propQuery->where('filter_id', $searchId);
+                    } else {
+                        $propQuery->whereNull('filter_id');
+                    }
+                    $propertyIds = $propQuery->pluck('id');
                     
                     if ($propertyIds->isNotEmpty()) {
                         Log::info("Found " . $propertyIds->count() . " properties to clear for filter_id: " . ($searchId ?? 'NULL'));
@@ -631,7 +643,8 @@ class InternalPropertyController extends Controller
     public function fetchAllProperties(Request $request)
     {
         try {
-            set_time_limit(600); // 10 minutes for batch processing
+            set_time_limit(0); // UNLIMITED time for large batch processing (was 600 = 10 min)
+            ini_set('memory_limit', '512M'); // Increase memory limit for large batches
             
             $request->validate([
                 'urls' => 'required|array',
@@ -641,9 +654,19 @@ class InternalPropertyController extends Controller
 
             $urls = $request->input('urls');
             $filterId = $request->input('filter_id');
+            
+            // New parameter: whether to skip sold history scraping for speed during mass imports
+            $skipSold = $request->input('skip_sold', false) === true || $request->input('skip_sold', 'true') === true;
+            
+            // AUTO-SKIP sold data if importing MORE than 200 properties to prevent timeouts
+            if (count($urls) > 200) {
+                $skipSold = true;
+                Log::info("Mass import detected (" . count($urls) . " properties). Auto-skipping sold data scraping for speed.");
+            }
+
             $startTime = microtime(true);
             
-            Log::info("Starting CONCURRENT batch fetch for " . count($urls) . " properties");
+            Log::info("Starting CONCURRENT batch fetch for " . count($urls) . " properties" . ($skipSold ? " (Skipping sold data)" : ""));
 
             // Use the service's concurrent fetch method for MASSIVE speed improvement
             $result = $this->propertyService->fetchPropertiesConcurrently($urls);
@@ -695,9 +718,16 @@ class InternalPropertyController extends Controller
                                 ]
                             );
                             
+                            if ($property) {
+                                $savedCount++;
+                                Log::debug("Successfully saved property {$propId} to database.");
+                            } else {
+                                Log::error("Failed to save property {$propId} to database (updateOrCreate returned null)");
+                            }
+                            
                             // SCRAPE & SAVE SOLD HISTORY DURING IMPORT
-                            // This makes import slower but shows sold data immediately
-                            if (!empty($propData['sold_link'])) {
+                            // ONLY if not explicitly skipped for speed
+                            if (!$skipSold && !empty($propData['sold_link'])) {
                                 Log::info("Found sold link for property {$propId}: " . $propData['sold_link']);
                                 
                                 try {
@@ -1172,8 +1202,8 @@ class InternalPropertyController extends Controller
         try {
             $client = new \GuzzleHttp\Client([
                 'verify' => false,
-                'timeout' => 30,
-                'connect_timeout' => 15,
+                'timeout' => 120, // INCREASED: 2 minutes to handle rate limiting
+                'connect_timeout' => 60, // INCREASED: 1 minute for slow connections
                 'headers' => [
                     'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -1183,9 +1213,13 @@ class InternalPropertyController extends Controller
             ]);
             
             $allUrls = [];
-            $maxPages = $fetchAll ? 50 : 1; 
+            $maxPages = $fetchAll ? PHP_INT_MAX : 1; // UNLIMITED: Scrape all pages until no more results found
             $consecutiveEmptyPages = 0;
-            $maxConsecutiveEmptyPages = 5;
+            $maxConsecutiveEmptyPages = 3; // Reduced to 3 for faster exit if empty
+            
+            // Increase memory and time for mass URL discovery
+            set_time_limit(0); 
+            ini_set('memory_limit', '1024M');
             
             for ($page = 0; $page < $maxPages; $page++) {
                 $retryCount = 0;
@@ -1216,6 +1250,11 @@ class InternalPropertyController extends Controller
                         if ($nextDataScript->count() > 0) {
                             $jsonString = $nextDataScript->html();
                             $jsonData = json_decode($jsonString, true);
+                            
+                            // Capture first page data for total counts
+                            if ($page === 0) {
+                                $firstPageJsonData = $jsonData;
+                            }
                             
                             if ($jsonData && isset($jsonData['props']['pageProps']['searchResults']['properties'])) {
                                 $propertiesData = $jsonData['props']['pageProps']['searchResults']['properties'];
@@ -1252,6 +1291,11 @@ class InternalPropertyController extends Controller
                             foreach ($scripts as $script) {
                                 if (preg_match('/window\.__NEXT_DATA__\s*=\s*({.*?});/s', $script, $matches)) {
                                     $jsonData = json_decode($matches[1], true);
+
+                                    // Capture first page data for total counts (fallback)
+                                    if ($page === 0 && !isset($firstPageJsonData)) {
+                                        $firstPageJsonData = $jsonData;
+                                    }
                                     
                                     if ($jsonData && isset($jsonData['props']['pageProps']['searchResults']['properties'])) {
                                         $propertiesData = $jsonData['props']['pageProps']['searchResults']['properties'];
@@ -1300,8 +1344,8 @@ class InternalPropertyController extends Controller
                         $retryCount++;
                         
                         if ($retryCount < $maxRetries) {
-                            Log::info("Retrying in 2 seconds...");
-                            sleep(2);
+                            Log::info("Retrying in 5 seconds...");
+                            sleep(5); // INCREASED: More respectful delay to avoid rate limiting
                         }
                     }
                 }
@@ -1324,8 +1368,8 @@ class InternalPropertyController extends Controller
                 }
                 
                 if ($page < $maxPages - 1) {
-                    Log::info("Waiting 1 second before next page...");
-                    sleep(1);
+                    Log::info("Waiting 2 seconds before next page...");
+                    sleep(2); // INCREASED: More delay between pages to avoid rate limiting
                 }
             }
             
@@ -1348,12 +1392,19 @@ class InternalPropertyController extends Controller
                 }
             }
 
-            Log::info("Successfully fetched " . count($uniqueUrls) . " unique property URLs");
+// Extract total result count from the first page's data
+            $totalResultCount = null;
+            if (isset($firstPageJsonData['props']['pageProps']['searchResults']['resultCount'])) {
+                $totalResultCount = str_replace(',', '', $firstPageJsonData['props']['pageProps']['searchResults']['resultCount']);
+            }
+
+            Log::info("Successfully fetched " . count($uniqueUrls) . " unique property URLs. Total Results on Source: " . ($totalResultCount ?? 'Unknown'));
 
             return response()->json([
                 'success' => true,
                 'message' => 'Property URLs fetched successfully',
                 'count' => count($uniqueUrls),
+                'total_result_count' => $totalResultCount,
                 'urls' => $uniqueUrls
             ]);
 

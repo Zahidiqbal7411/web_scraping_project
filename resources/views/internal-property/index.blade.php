@@ -1638,12 +1638,20 @@
                 @endif
             </h1>
             @if(isset($search))
-            <button class="sync-btn" id="syncBtn">
-                <svg class="sync-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
-                </svg>
-                Import Properties
-            </button>
+            <div style="display: flex; gap: 1rem;">
+                <button class="sync-btn" id="headerImportSoldBtn" style="display: none; background: var(--secondary);">
+                    <svg class="sync-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    Import Sold Properties
+                </button>
+                <button class="sync-btn" id="syncBtn">
+                    <svg class="sync-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                    </svg>
+                    Import Properties
+                </button>
+            </div>
             @endif
         </div>
 
@@ -1700,6 +1708,25 @@
             </div>
         </div>
 
+        <!-- Limit Warning Banner (Persistent) -->
+        <div id="limitWarning" style="display: none; background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; padding: 1rem; margin-bottom: 1.5rem; border-radius: 8px; flex-direction: row; align-items: flex-start; gap: 1rem;">
+            <svg style="width: 24px; height: 24px; flex-shrink: 0;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            <div style="flex: 1;">
+                <h4 style="margin: 0 0 0.5rem 0; font-weight: 600; font-size: 1rem;">Source Website Limit Reached (42 Pages)</h4>
+                <p style="margin: 0; font-size: 0.95rem; line-height: 1.5;">
+                    You have retrieved <strong>100%</strong> of the properties that Rightmove allows you to view for this single search. 
+                    The remaining <strong id="limitHiddenCount">0</strong> properties are hidden by the source website (Rightmove restricts *any* search to 42 pages).
+                </p>
+                <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e6dbb9;">
+                    <strong>How to get the rest?</strong> <br>
+                    Use the <b>Split Search Strategy</b>: Create multiple smaller searches using <b>Price Ranges</b> (e.g., Search 1: £0-£200k, Search 2: £200k-£500k). 
+                    Run each search separately to bypass the 1000-property limit.
+                </div>
+            </div>
+        </div>
+
         <!-- Alerts -->
         <div class="alert alert-success" id="successAlert"></div>
         <div class="alert alert-error" id="errorAlert"></div>
@@ -1747,9 +1774,30 @@
 
 @section('scripts')
     <script>
+        // Global fetch timeout wrapper to prevent timeout errors on long-running imports
+        const originalFetch = window.fetch;
+        window.fetch = function(...args) {
+            // If no timeout specified, add 30 minute timeout for all requests
+            const config = args[1] || {};
+            if (!config.signal) {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => {
+                    console.log("Request taking longer than 30 minutes, but still running...");
+                    // Don't actually abort, just log
+                }, 1800000); // 30 minutes
+                
+                config.signal = controller.signal;
+                args[1] = config;
+                
+                return originalFetch(...args).finally(() => clearTimeout(timeout));
+            }
+            return originalFetch(...args);
+        };
+        
         window.searchContext = @json($search ?? null);
     </script>
     <script>
+        
         // State
         let currentSlide = 0;
         let propertyData = null;
@@ -1790,6 +1838,13 @@
         if (syncBtn) {
             syncBtn.addEventListener('click', async () => {
                 await importAllProperties(true);
+            });
+        }
+
+        const headerImportSoldBtn = document.getElementById('headerImportSoldBtn');
+        if (headerImportSoldBtn) {
+            headerImportSoldBtn.addEventListener('click', async () => {
+                await fetchRemainingSoldData();
             });
         }
 
@@ -1873,8 +1928,8 @@
         async function loadPropertiesPage(page) {
             try {
                 const url = window.searchContext 
-                    ? `/internal-properties/load?search_id=${window.searchContext.id}&page=${page}&per_page=200` 
-                    : `/internal-properties/load?page=${page}&per_page=200`;
+                    ? `/internal-properties/load?search_id=${window.searchContext.id}&page=${page}&per_page=999999` 
+                    : `/internal-properties/load?page=${page}&per_page=999999`;
                 
                 console.log(`Loading page ${page} from:`, url);
                 
@@ -1990,12 +2045,37 @@
                 emptyState.classList.remove('active');
 
                 showAlert('success', `Imported ${urlsData.urls.length} property URLs. Loading details...`);
+                
+                // EXPLAIN LIMITATION to user if relevant (Using Persistent Banner)
+                const limitWarning = document.getElementById('limitWarning');
+                const limitHiddenCount = document.getElementById('limitHiddenCount');
+                
+                if (limitWarning) {
+                    limitWarning.style.display = 'none'; // Reset first
+                    
+                    if (urlsData.total_result_count && parseInt(urlsData.total_result_count) > urlsData.urls.length) {
+                        const total = parseInt(urlsData.total_result_count);
+                        const diff = total - urlsData.urls.length;
+                        
+                        // Show warning if significant difference (e.g. > 50 hidden properties)
+                        if (diff > 50) {
+                            limitHiddenCount.textContent = diff.toLocaleString();
+                            limitWarning.style.display = 'flex';
+                            
+                            // Also show a temporary alert for immediate feedback
+                            setTimeout(() => {
+                                showAlert('warning', `Source Limit Reached: ${diff} properties are hidden by Rightmove. See the info box above for solution.`);
+                            }, 2000);
+                        }
+                    }
+                }
 
                 propertyUrls = urlsData.urls;
                 
                 // Show stats
                 statsBar.style.display = 'flex';
-                totalCount.textContent = propertyUrls.length;
+                // Show "Viewable" count instead of just "Total" to be precise
+                totalCount.textContent = propertyUrls.length + (urlsData.total_result_count ? ` (of ${urlsData.total_result_count} matches)` : '');
                 loadedCount.textContent = '0';
 
                 // Instantly display all properties with placeholders
@@ -2145,10 +2225,13 @@
             hideProgressBar();
             document.getElementById('importLoading').classList.remove('active');
             syncBtn.disabled = false;
-            showAlert('success', `✓ Import complete! ${processed} properties loaded. Now fetching sold data...`);
             
-            // AUTOMATICALLY FETCH SOLD DATA FOR ALL PROPERTIES
-            await autoFetchAllSoldData();
+            // CHANGED: Don't auto-fetch sold data, let user click the button instead
+            // await autoFetchAllSoldData();
+            
+            // Show the Import Sold Properties button for user to click
+            autoShowSoldImportBtn();
+            showAlert('success', `✓ Import complete! ${processed} properties loaded. Click "Import Sold Properties" button to fetch sold data.`);
         }
         
         // Automatically fetch sold data for ALL properties that don't have it
@@ -2282,7 +2365,8 @@
                     },
                     body: JSON.stringify({ 
                         urls: batch,
-                        filter_id: window.searchContext ? window.searchContext.id : null
+                        filter_id: window.searchContext ? window.searchContext.id : null,
+                        skip_sold: true // SPEED OPTIMIZATION: Skip intensive sold-scraping for mass imports
                     })
                 });
 
@@ -2414,6 +2498,150 @@
                     });
                 }
             });
+
+            // Update header import sold button visibility
+            autoShowSoldImportBtn();
+        }
+
+        // Toggle visibility of global "Import Sold Properties" button
+        function autoShowSoldImportBtn() {
+            const btn = document.getElementById('headerImportSoldBtn');
+            if (!btn || !loadedProperties) return;
+
+            const propsWithoutSold = loadedProperties.filter(p => !p.sold_properties || p.sold_properties.length === 0);
+            
+            if (propsWithoutSold.length > 0) {
+                btn.style.display = 'flex';
+                btn.innerHTML = `
+                    <svg class="sync-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    Import Sold Properties (${propsWithoutSold.length})
+                `;
+            } else {
+                btn.style.display = 'none';
+            }
+        }
+
+        // Bulk import sold data for properties missing it
+        async function fetchRemainingSoldData() {
+            const btn = document.getElementById('headerImportSoldBtn');
+            if (!btn || btn.disabled) return;
+
+            const propsWithoutSold = loadedProperties.filter(p => !p.sold_properties || p.sold_properties.length === 0);
+            
+            if (propsWithoutSold.length === 0) {
+                showAlert('success', 'All properties already have sold data!');
+                return;
+            }
+
+            btn.disabled = true;
+            const originalContent = btn.innerHTML;
+            
+            try {
+                showAlert('success', `Starting bulk import of sold data for ${propsWithoutSold.length} properties...`);
+                
+                let processed = 0;
+                let foundTotal = 0;
+
+                for (const prop of propsWithoutSold) {
+                    btn.innerHTML = `
+                        <span class="spinner-sm" style="display:inline-block; width:12px; height:12px; border:2px solid currentColor; border-top-color:transparent; border-radius:50%; animation:spin 1s linear infinite;"></span>
+                        Importing ${processed + 1}/${propsWithoutSold.length}...
+                    `;
+
+                    try {
+                        const response = await fetch('/internal-properties/process-sold', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Accept': 'application/json',
+                                'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                            },
+                            body: JSON.stringify({ property_id: prop.id })
+                        });
+
+                        const data = await response.json();
+                        
+                        if (data.success && data.property) {
+                            const idx = loadedProperties.findIndex(p => p.id == prop.id);
+                            if (idx !== -1) {
+                                loadedProperties[idx] = data.property;
+                                updatePropertyCard(data.property);
+                                foundTotal += data.property.sold_properties?.length || 0;
+                            }
+                        }
+                    } catch (err) {
+                        console.error(`Error importing sold data for ${prop.id}:`, err);
+                    }
+
+                    processed++;
+                }
+
+                showAlert('success', `Bulk import complete! Processed ${processed} properties, found ${foundTotal} sold records.`);
+                autoShowSoldImportBtn();
+
+            } catch (error) {
+                console.error('Bulk import error:', error);
+                showAlert('error', 'An error occurred during bulk import: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalContent;
+            }
+        }
+        
+        // Import sold data for a SINGLE property (from card button)
+        async function importAllSoldHistory(event, propertyId) {
+            event.stopPropagation(); // Prevent card click
+            
+            const btn = document.getElementById(`header-import-${propertyId}`);
+            if (!btn || btn.disabled) return;
+            
+            btn.disabled = true;
+            const originalHTML = btn.innerHTML;
+            
+            // Show spinner
+            btn.innerHTML = `
+                <span class="spinner-sm active"></span>
+                <span class="btn-text">Importing...</span>
+            `;
+            
+            try {
+                const response = await fetch('/internal-properties/process-sold', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                    },
+                    body: JSON.stringify({ property_id: propertyId })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success && data.property) {
+                    // Update property in array
+                    const idx = loadedProperties.findIndex(p => p.id == propertyId);
+                    if (idx !== -1) {
+                        loadedProperties[idx] = data.property;
+                        updatePropertyCard(data.property);
+                    }
+                    
+                    showAlert('success', `Imported ${data.property.sold_properties?.length || 0} sold records`);
+                    
+                    // Hide button after successful import
+                    btn.style.display = 'none';
+                } else {
+                    showAlert('error', data.message || 'Failed to import sold data');
+                    btn.disabled = false;
+                    btn.innerHTML = originalHTML;
+                }
+            } catch (error) {
+                console.error('Import error:', error);
+                showAlert('error', 'Error importing sold data: ' + error.message);
+                btn.disabled = false;
+                btn.innerHTML = originalHTML;
+            }
         }
 
         // Render pagination controls
@@ -2816,7 +3044,7 @@
                                 `}
                             </div>
                             
-                            ${property.sold_link ? `
+                            ${(property.sold_link || (!property.sold_properties || property.sold_properties.length === 0)) ? `
                                 <button class="sold-header-import-btn" id="header-import-${property.id}" 
                                         onclick="importAllSoldHistory(event, '${property.id}')" title="Import Sold History">
                                     <span class="spinner-sm"></span>

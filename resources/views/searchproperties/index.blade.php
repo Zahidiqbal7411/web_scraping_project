@@ -1337,7 +1337,7 @@
             saveSearchBtn.innerHTML = '<span class="spinner"></span> Saving...';
 
             try {
-                const endpoint = isEdit ? `{{ url('searchproperties/update', [], false) }}/${editSearchId.value}` : "{{ route('searchproperties.store', [], false) }}";
+                const endpoint = isEdit ? `{{ route('searchproperties.update', ['id' => 'REPLACE_ID'], false) }}`.replace('REPLACE_ID', editSearchId.value) : "{{ route('searchproperties.store', [], false) }}";
                 const method = isEdit ? 'PUT' : 'POST';
 
                 const response = await fetch(endpoint, {
@@ -1349,7 +1349,19 @@
                     },
                     body: JSON.stringify({ 
                         updates_url: url,
-                        area: areaInput.value.trim() // Send area explicitly
+                        area: areaInput.value.trim(),
+                        min_price: minPriceSelect.value,
+                        max_price: maxPriceSelect.value,
+                        min_bed: minBedroomsSelect.value,
+                        max_bed: maxBedroomsSelect.value,
+                        min_bath: document.getElementById('minBathrooms')?.value || '',
+                        max_bath: document.getElementById('maxBathrooms')?.value || '',
+                        property_type: Array.from(document.querySelectorAll('input[name="propertyType"]:checked')).map(cb => cb.value).join(','),
+                        tenure_types: Array.from(document.querySelectorAll('input[name="tenureType"]:checked')).map(cb => cb.value).join(','),
+                        must_have: Array.from(document.querySelectorAll('input[name="mustHave"]:checked')).map(cb => cb.value).join(','),
+                        dont_show: Array.from(document.querySelectorAll('input[name="dontShow"]:checked')).map(cb => cb.value).join(','),
+                        max_days_since_added: document.getElementById('maxDaysSinceAdded')?.value || '',
+                        include_sstc: (document.getElementById('includeSSTC')?.checked) ? 1 : 0
                     })
                 });
 
@@ -1706,7 +1718,7 @@
 
                 editSearchId.value = id;
                 modalTitle.textContent = 'Edit Search';
-                saveButtonText.textContent = 'Update Search';
+                saveButtonText.textContent = 'Edit Search';
                 
                 // Show Save button and Generate URL button for edit mode
                 saveSearchBtn.style.display = 'flex';
@@ -1754,8 +1766,12 @@
                 // 5. include SSTC
                 const includeSSTC = document.getElementById('includeSSTC');
                 if (includeSSTC) {
-                    const sstcVal = getParamFromUrl(url, 'includeSSTC');
-                    includeSSTC.checked = sstcVal === 'true' || url.includes('includeSSTC=true');
+                    if (search.include_sstc !== undefined && search.include_sstc !== null) {
+                        includeSSTC.checked = !!search.include_sstc;
+                    } else {
+                        const sstcVal = getParamFromUrl(url, 'includeSSTC');
+                        includeSSTC.checked = sstcVal === 'true' || url.includes('includeSSTC=true');
+                    }
                 }
 
                 // 6. Property Types
@@ -1908,7 +1924,7 @@
             confirmDeleteBtn.textContent = 'Deleting...';
 
             try {
-                const response = await fetch(`{{ url('searchproperties', [], false) }}/${id}`, {
+                const response = await fetch(`{{ route('searchproperties.destroy', ['id' => 'REPLACE_ID'], false) }}`.replace('REPLACE_ID', id), {
                     method: 'DELETE',
                     headers: {
                         'X-CSRF-TOKEN': getCsrfToken()
@@ -1922,10 +1938,11 @@
                     closeDeleteModal();
                     loadSearches();
                 } else {
-                    showAlert('error', 'Failed to delete search');
+                    showAlert('error', data.message || 'Failed to delete search');
                 }
             } catch (error) {
-                showAlert('error', 'Error deleting search');
+                console.error('Delete error:', error);
+                showAlert('error', 'Error deleting search: ' + (error.message || 'Unknown error'));
             } finally {
                 confirmDeleteBtn.disabled = false;
                 confirmDeleteBtn.textContent = 'Delete';

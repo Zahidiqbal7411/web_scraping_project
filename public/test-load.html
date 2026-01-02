@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Load Endpoint</title>
+</head>
+<body>
+    <h1>Testing Database Load</h1>
+    <div id="result">Loading...</div>
+    
+    <script>
+        async function test() {
+            try {
+                console.log('Fetching from /internal-properties/load...');
+                const response = await fetch('/internal-properties/load?search_id=1');
+                const data = await response.json();
+                
+                document.getElementById('result').innerHTML = `
+                    <h2>✓ Success!</h2>
+                    <p>Total properties: ${data.total}</p>
+                    <p>Properties found: ${data.properties ? data.properties.length : 0}</p>
+                    <pre>${JSON.stringify(data, null, 2).substring(0, 500)}</pre>
+                `;
+            } catch (error) {
+                document.getElementById('result').innerHTML = `
+                    <h2>❌ Error!</h2>
+                    <p>${error.message}</p>
+                `;
+                console.error('Error:', error);
+            }
+        }
+        test();
+    </script>
+</body>
+</html>
