@@ -496,7 +496,8 @@ class InternalPropertyController extends Controller
                 $search = SavedSearch::find($searchId);
                 if ($search && $search->updates_url) {
                     Log::info("Fetching URLs for Saved Search #{$searchId}: {$search->updates_url}");
-                    $response = $this->scrapePropertyUrls($search->updates_url, true);
+                    // USE AUTO-SPLIT for unlimited property import
+                    $response = $this->scrapeWithAutoSplit($search->updates_url);
                 } else {
                     $response = $this->syncUrls();
                 }
@@ -1187,7 +1188,328 @@ class InternalPropertyController extends Controller
             $baseUrl = $request->input('url');
         }
 
-        return $this->scrapePropertyUrls($baseUrl);
+        return $this->scrapeWithAutoSplit($baseUrl);
+    }
+
+    /**
+     * Generate price range splits for a URL to bypass the 1000 result limit
+     * Uses realistic UK property price bands for better distribution
+     * 
+     * @param string $baseUrl The original search URL
+     * @param int $totalResults The total number of results available
+     * @param int|null $currentMin Current minimum price in URL (null if not set)
+     * @param int|null $currentMax Current maximum price in URL (null if not set)
+     * @return array Array of URLs with different price ranges
+     */
+    private function generatePriceRangeSplits($baseUrl, $totalResults, $currentMin = null, $currentMax = null)
+    {
+        // Use realistic UK property price bands
+        // Most UK properties are between £50k-£500k, with some up to £2M+
+        // Using smaller bands at lower prices where most properties cluster
+        
+        $priceBands = [
+            // Under £250k - smaller bands (50k) where most properties are
+            [0, 50000],
+            [50000, 100000],
+            [100000, 150000],
+            [150000, 200000],
+            [200000, 250000],
+            // £250k-£500k - medium bands (50k)
+            [250000, 300000],
+            [300000, 350000],
+            [350000, 400000],
+            [400000, 450000],
+            [450000, 500000],
+            // £500k-£1M - larger bands (100k)
+            [500000, 600000],
+            [600000, 700000],
+            [700000, 800000],
+            [800000, 900000],
+            [900000, 1000000],
+            // £1M+ - even larger bands
+            [1000000, 1250000],
+            [1250000, 1500000],
+            [1500000, 2000000],
+            [2000000, 3000000],
+            [3000000, 5000000],
+            [5000000, 15000000],
+        ];
+        
+        // If user specified min/max, filter bands to only those in range
+        $minPrice = $currentMin ?? 0;
+        $maxPrice = $currentMax ?? 15000000;
+        
+        $filteredBands = [];
+        foreach ($priceBands as $band) {
+            // Include band if it overlaps with user's range
+            if ($band[1] > $minPrice && $band[0] < $maxPrice) {
+                $filteredBands[] = [
+                    max($band[0], $minPrice), // Adjust lower bound
+                    min($band[1], $maxPrice)  // Adjust upper bound
+                ];
+            }
+        }
+        
+        // If no bands match (shouldn't happen), use the full range as single band
+        if (empty($filteredBands)) {
+            $filteredBands = [[$minPrice, $maxPrice]];
+        }
+        
+        Log::info("Auto-split: Using " . count($filteredBands) . " price bands from £" . number_format($minPrice) . " to £" . number_format($maxPrice));
+        
+        $splitUrls = [];
+        
+        foreach ($filteredBands as $i => $band) {
+            $splitUrl = $this->buildUrlWithPriceRange($baseUrl, $band[0], $band[1]);
+            
+            $splitUrls[] = [
+                'url' => $splitUrl,
+                'min_price' => $band[0],
+                'max_price' => $band[1],
+                'label' => "£" . number_format($band[0]) . " - £" . number_format($band[1])
+            ];
+            
+            Log::info("Auto-split: Band " . ($i + 1) . ": {$splitUrls[$i]['label']}");
+        }
+        
+        return $splitUrls;
+    }
+    
+    /**
+     * Build a URL with specific price range parameters
+     * 
+     * @param string $baseUrl The base search URL
+     * @param int $minPrice Minimum price
+     * @param int $maxPrice Maximum price
+     * @return string Modified URL with price range
+     */
+    private function buildUrlWithPriceRange($baseUrl, $minPrice, $maxPrice)
+    {
+        // Parse existing URL
+        $parsedUrl = parse_url($baseUrl);
+        $query = [];
+        
+        if (isset($parsedUrl['query'])) {
+            parse_str($parsedUrl['query'], $query);
+        }
+        
+        // Remove existing price parameters
+        unset($query['minPrice']);
+        unset($query['maxPrice']);
+        
+        // Add new price range
+        $query['minPrice'] = $minPrice;
+        $query['maxPrice'] = $maxPrice;
+        
+        // Rebuild URL
+        $newQuery = http_build_query($query);
+        $newUrl = $parsedUrl['scheme'] . '://' . $parsedUrl['host'] . $parsedUrl['path'];
+        
+        if ($newQuery) {
+            $newUrl .= '?' . $newQuery;
+        }
+        
+        return $newUrl;
+    }
+    
+    /**
+     * Extract current price range from URL
+     * 
+     * @param string $url The search URL
+     * @return array [minPrice, maxPrice] or [null, null] if not set
+     */
+    private function extractPriceRangeFromUrl($url)
+    {
+        $parsedUrl = parse_url($url);
+        $query = [];
+        
+        if (isset($parsedUrl['query'])) {
+            parse_str($parsedUrl['query'], $query);
+        }
+        
+        $minPrice = isset($query['minPrice']) ? (int)$query['minPrice'] : null;
+        $maxPrice = isset($query['maxPrice']) ? (int)$query['maxPrice'] : null;
+        
+        return [$minPrice, $maxPrice];
+    }
+    
+    /**
+     * Scrape property URLs with automatic splitting when results exceed 1000
+     * This method wraps scrapePropertyUrls and handles auto-splitting
+     * 
+     * @param string $baseUrl The Rightmove search URL
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function scrapeWithAutoSplit($baseUrl)
+    {
+        Log::info("Starting auto-split scrape for: " . $baseUrl);
+        
+        set_time_limit(0); // Unlimited time for large imports
+        ini_set('memory_limit', '2048M'); // 2GB for very large datasets
+        
+        // First, do a quick probe to get total result count
+        $probeResult = $this->scrapePropertyUrlsSinglePage($baseUrl);
+        
+        if (!$probeResult['success']) {
+            return response()->json($probeResult);
+        }
+        
+        $totalResults = (int)str_replace(',', '', $probeResult['total_result_count'] ?? '0');
+        
+        Log::info("Auto-split probe: Total results available = {$totalResults}");
+        
+        // If under 1000, just do a normal scrape
+        if ($totalResults <= 1000) {
+            Log::info("Results under 1000, using standard scrape");
+            return $this->scrapePropertyUrls($baseUrl, true);
+        }
+        
+        // Need to split!
+        Log::info("AUTO-SPLIT ACTIVATED: {$totalResults} results detected, splitting by price range");
+        
+        // Extract current price range from URL
+        [$currentMin, $currentMax] = $this->extractPriceRangeFromUrl($baseUrl);
+        
+        // Generate split URLs
+        $splitUrls = $this->generatePriceRangeSplits($baseUrl, $totalResults, $currentMin, $currentMax);
+        
+        $allUrls = [];
+        $seenIds = [];
+        $splitResults = [];
+        
+        foreach ($splitUrls as $index => $split) {
+            $splitNum = $index + 1;
+            $totalSplits = count($splitUrls);
+            
+            Log::info("Processing split {$splitNum}/{$totalSplits}: {$split['label']}");
+            
+            try {
+                // Scrape this price range
+                $response = $this->scrapePropertyUrls($split['url'], true);
+                $data = $response->getData(true);
+                
+                if ($data['success'] && !empty($data['urls'])) {
+                    $splitCount = 0;
+                    
+                    foreach ($data['urls'] as $urlData) {
+                        $propId = $urlData['id'] ?? null;
+                        
+                        // Deduplicate by property ID
+                        if ($propId && !in_array($propId, $seenIds)) {
+                            $seenIds[] = $propId;
+                            $allUrls[] = $urlData;
+                            $splitCount++;
+                        } elseif (!$propId) {
+                            // No ID, add anyway but might be duplicate
+                            $allUrls[] = $urlData;
+                            $splitCount++;
+                        }
+                    }
+                    
+                    $splitResults[] = [
+                        'range' => $split['label'],
+                        'found' => count($data['urls']),
+                        'unique' => $splitCount
+                    ];
+                    
+                    Log::info("Split {$splitNum} complete: Found {$data['count']} properties, added {$splitCount} unique");
+                    
+                    // Check if this split also hit the 1000 limit (needs recursive split)
+                    $splitTotal = (int)str_replace(',', '', $data['total_result_count'] ?? '0');
+                    if ($splitTotal > 1000 && count($data['urls']) >= 1000) {
+                        Log::warning("Split {$splitNum} also hit 1000 limit ({$splitTotal} total). Consider narrower price ranges.");
+                    }
+                } else {
+                    Log::warning("Split {$splitNum} returned no results");
+                    $splitResults[] = [
+                        'range' => $split['label'],
+                        'found' => 0,
+                        'unique' => 0
+                    ];
+                }
+                
+                // Delay between splits to avoid rate limiting
+                if ($index < count($splitUrls) - 1) {
+                    sleep(3);
+                }
+                
+            } catch (\Exception $e) {
+                Log::error("Error processing split {$splitNum}: " . $e->getMessage());
+                $splitResults[] = [
+                    'range' => $split['label'],
+                    'error' => $e->getMessage()
+                ];
+            }
+        }
+        
+        Log::info("Auto-split complete! Total unique properties: " . count($allUrls) . " from {$totalResults} available");
+        
+        return response()->json([
+            'success' => true,
+            'message' => "Auto-split complete: Retrieved " . count($allUrls) . " unique properties using " . count($splitUrls) . " price range splits",
+            'count' => count($allUrls),
+            'total_result_count' => $totalResults,
+            'auto_split_used' => true,
+            'split_count' => count($splitUrls),
+            'split_results' => $splitResults,
+            'urls' => $allUrls
+        ]);
+    }
+    
+    /**
+     * Quick single-page scrape to probe total result count
+     * 
+     * @param string $baseUrl The search URL
+     * @return array Result data including total_result_count
+     */
+    private function scrapePropertyUrlsSinglePage($baseUrl)
+    {
+        try {
+            $client = new \GuzzleHttp\Client([
+                'verify' => false,
+                'timeout' => 60,
+                'connect_timeout' => 30,
+                'headers' => [
+                    'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language' => 'en-GB,en;q=0.9',
+                ]
+            ]);
+            
+            $response = $client->request('GET', $baseUrl);
+            $html = $response->getBody()->getContents();
+            
+            $crawler = new \Symfony\Component\DomCrawler\Crawler($html);
+            $nextDataScript = $crawler->filter('script#__NEXT_DATA__')->first();
+            
+            if ($nextDataScript->count() > 0) {
+                $jsonString = $nextDataScript->html();
+                $jsonData = json_decode($jsonString, true);
+                
+                if ($jsonData && isset($jsonData['props']['pageProps']['searchResults'])) {
+                    $resultCount = $jsonData['props']['pageProps']['searchResults']['resultCount'] ?? '0';
+                    $properties = $jsonData['props']['pageProps']['searchResults']['properties'] ?? [];
+                    
+                    return [
+                        'success' => true,
+                        'total_result_count' => $resultCount,
+                        'first_page_count' => count($properties)
+                    ];
+                }
+            }
+            
+            return [
+                'success' => false,
+                'message' => 'Could not parse search results'
+            ];
+            
+        } catch (\Exception $e) {
+            Log::error("Single page probe error: " . $e->getMessage());
+            return [
+                'success' => false,
+                'message' => $e->getMessage()
+            ];
+        }
     }
 
     /**

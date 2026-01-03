@@ -2044,7 +2044,13 @@
                 // Hide empty state now that we have data
                 emptyState.classList.remove('active');
 
-                showAlert('success', `Imported ${urlsData.urls.length} property URLs. Loading details...`);
+                // Show auto-split information if used
+                if (urlsData.auto_split_used) {
+                    showAlert('success', `✨ Auto-Split Complete! Retrieved ${urlsData.urls.length} properties using ${urlsData.split_count} price range splits (Source total: ${urlsData.total_result_count}). Loading details...`);
+                    console.log('Auto-split results:', urlsData.split_results);
+                } else {
+                    showAlert('success', `Imported ${urlsData.urls.length} property URLs. Loading details...`);
+                }
                 
                 // EXPLAIN LIMITATION to user if relevant (Using Persistent Banner)
                 const limitWarning = document.getElementById('limitWarning');
