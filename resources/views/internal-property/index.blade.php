@@ -1961,8 +1961,8 @@
             }
         }
 
-        // Import all properties with OPTIMIZED concurrent progressive loading
-        // This is called when user clicks the Import button
+        // Import all properties using QUEUE-BASED background processing
+        // This dispatches a job to the queue and polls for progress
         async function importAllProperties(isImport = true) {
             const importLoading = document.getElementById('importLoading');
             
@@ -1977,146 +1977,158 @@
                 importLoading.classList.add('active');
                 syncBtn.disabled = true;
 
-                showAlert('success', 'Fetching property URLs from source website... Please wait.');
+                showAlert('success', '🚀 Starting background import... This runs in the queue for unlimited properties.');
                 
-                // Always fetch from source when importing (isImport=true)
-                const url = window.searchContext 
-                    ? `/internal-properties/fetch-urls?search_id=${window.searchContext.id}&import=true` 
-                    : `/internal-properties/fetch-urls?import=true`;
-                
-                // Create AbortController with 10 minute timeout for URL scraping
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minutes
-                
-                let urlsResponse;
-                try {
-                    urlsResponse = await fetch(url, { signal: controller.signal });
-                    clearTimeout(timeoutId);
-                } catch (fetchError) {
-                    clearTimeout(timeoutId);
-                    if (fetchError.name === 'AbortError') {
-                        throw new Error('Request timed out after 10 minutes. The server may still be processing. Please refresh the page in a few minutes.');
-                    }
-                    // Handle common network errors with more helpful messages
-                    if (fetchError.message === 'Failed to fetch') {
-                        throw new Error('Network error: Failed to connect to server. Please check that the server is running and try again.');
-                    }
-                    throw fetchError;
-                }
-                
-                if (!urlsResponse.ok) {
-                    const errorText = await urlsResponse.text().catch(() => 'Unknown error');
-                    
-                    // Try to parse JSON error response first
-                    let errorMessage = `Server error (${urlsResponse.status})`;
+                // Start the queued import
+                const startResponse = await fetch('/internal-properties/import/start', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                    },
+                    body: JSON.stringify({
+                        search_id: window.searchContext ? window.searchContext.id : null,
+                        url: window.searchContext ? window.searchContext.updates_url : null
+                    })
+                });
+
+                if (!startResponse.ok) {
+                    const errorText = await startResponse.text().catch(() => 'Unknown error');
+                    let errorMessage = `Server error (${startResponse.status})`;
                     try {
                         const errorJson = JSON.parse(errorText);
-                        errorMessage = errorJson.message || errorJson.error || errorMessage;
+                        errorMessage = errorJson.message || errorMessage;
                     } catch (e) {
-                        // If HTML response, try to extract title or show generic message
-                        if (errorText.includes('<!DOCTYPE') || errorText.includes('<html')) {
-                            const titleMatch = errorText.match(/<title[^>]*>([^<]+)<\/title>/i);
-                            if (titleMatch) {
-                                errorMessage = `Server error: ${titleMatch[1].trim()}`;
-                            } else {
-                                errorMessage = `Server error (${urlsResponse.status}): An internal server error occurred. Please check Laravel logs for details.`;
-                            }
-                        } else {
-                            // Plain text error
-                            errorMessage = errorText.substring(0, 150);
-                        }
+                        errorMessage = errorText.substring(0, 150);
                     }
-                    
                     throw new Error(errorMessage);
                 }
+
+                const startData = await startResponse.json();
                 
-                let urlsData;
-                try {
-                    urlsData = await urlsResponse.json();
-                } catch (jsonError) {
-                    throw new Error('Server returned invalid JSON response. Check Laravel logs for errors.');
+                if (!startData.success) {
+                    throw new Error(startData.message || 'Failed to start import');
                 }
 
-                if (!urlsData.success || !urlsData.urls || urlsData.urls.length === 0) {
-                    throw new Error(urlsData.message || urlsData.hint || 'No property URLs found');
-                }
+                const sessionId = startData.session_id;
+                console.log(`✅ Import session started: ${sessionId}`);
+                showAlert('success', `📦 Import job dispatched to queue (Session #${sessionId}). Processing in background...`);
                 
-                // Hide empty state now that we have data
-                emptyState.classList.remove('active');
-
-                // Show auto-split information if used
-                if (urlsData.auto_split_used) {
-                    showAlert('success', `✨ Auto-Split Complete! Retrieved ${urlsData.urls.length} properties using ${urlsData.split_count} price range splits (Source total: ${urlsData.total_result_count}). Loading details...`);
-                    console.log('Auto-split results:', urlsData.split_results);
-                } else {
-                    showAlert('success', `Imported ${urlsData.urls.length} property URLs. Loading details...`);
-                }
+                // Show progress bar
+                showProgressBar(0, 0);
                 
-                // EXPLAIN LIMITATION to user if relevant (Using Persistent Banner)
-                const limitWarning = document.getElementById('limitWarning');
-                const limitHiddenCount = document.getElementById('limitHiddenCount');
-                
-                if (limitWarning) {
-                    limitWarning.style.display = 'none'; // Reset first
-                    
-                    if (urlsData.total_result_count && parseInt(urlsData.total_result_count) > urlsData.urls.length) {
-                        const total = parseInt(urlsData.total_result_count);
-                        const diff = total - urlsData.urls.length;
-                        
-                        // Show warning if significant difference (e.g. > 50 hidden properties)
-                        if (diff > 50) {
-                            limitHiddenCount.textContent = diff.toLocaleString();
-                            limitWarning.style.display = 'flex';
-                            
-                            // Also show a temporary alert for immediate feedback
-                            setTimeout(() => {
-                                showAlert('warning', `Source Limit Reached: ${diff} properties are hidden by Rightmove. See the info box above for solution.`);
-                            }, 2000);
-                        }
-                    }
-                }
-
-                propertyUrls = urlsData.urls;
-                
-                // Show stats
-                statsBar.style.display = 'flex';
-                // Show "Viewable" count instead of just "Total" to be precise
-                totalCount.textContent = propertyUrls.length + (urlsData.total_result_count ? ` (of ${urlsData.total_result_count} matches)` : '');
-                loadedCount.textContent = '0';
-
-                // Instantly display all properties with placeholders
-                loadedProperties = propertyUrls.map((urlData, index) => ({
-                    id: urlData.id || index,
-                    url: urlData.url,
-                    title: urlData.title || 'Property for sale',
-                    price: urlData.price || 'Price on request',
-                    address: urlData.address || 'Loading...',
-                    property_type: '',
-                    bedrooms: '',
-                    bathrooms: '',
-                    size: '',
-                    tenure: '',
-                    reduced_on: '',
-                    images: [],
-                    loading: true
-                }));
-
-                displayProperties(loadedProperties);
-                loading.classList.remove('active');
-                importLoading.classList.remove('active'); // Hide import loader since we now show progress bar
-                
-                showAlert('success', `Showing ${loadedProperties.length} properties. Fetching details from source...`);
-
-                // Load details with CONCURRENT batching for MAXIMUM SPEED
-                // This scrapes full property details from source website
-                await loadDetailsConcurrently(propertyUrls);
+                // Start polling for progress
+                await pollImportProgress(sessionId);
 
             } catch (error) {
-                console.error('Error importing properties:', error);
-                showAlert('error', error.message || 'An error occurred while importing properties');
+                console.error('Error starting import:', error);
+                showAlert('error', error.message || 'An error occurred while starting the import');
                 emptyState.classList.add('active');
-                loading.classList.remove('active');
+                document.getElementById('importLoading').classList.remove('active');
                 syncBtn.disabled = false;
+            }
+        }
+
+        // Poll for import progress until complete
+        async function pollImportProgress(sessionId) {
+            const pollInterval = 2000; // Poll every 2 seconds
+            let lastStatus = null;
+            
+            const poll = async () => {
+                try {
+                    const response = await fetch(`/internal-properties/import/progress/${sessionId}`, {
+                        headers: {
+                            'Accept': 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        }
+                    });
+                    
+                    if (!response.ok) {
+                        console.error('Progress poll failed:', response.status);
+                        return;
+                    }
+                    
+                    const data = await response.json();
+                    
+                    if (!data.success || !data.session) {
+                        console.error('Invalid progress response:', data);
+                        return;
+                    }
+                    
+                    const session = data.session;
+                    lastStatus = session.status;
+                    
+                    // Update progress UI
+                    updateQueueProgress(session);
+                    
+                    // Check if finished
+                    if (session.is_finished) {
+                        console.log(`✅ Import finished with status: ${session.status}`);
+                        
+                        if (session.status === 'completed') {
+                            showAlert('success', `🎉 Import complete! ${session.imported_properties} properties imported.`);
+                            // Reload properties from database
+                            await loadFromDatabaseOnStartup();
+                        } else if (session.status === 'failed') {
+                            showAlert('error', `❌ Import failed: ${session.error_message || 'Unknown error'}`);
+                        } else if (session.status === 'cancelled') {
+                            showAlert('warning', '⚠️ Import was cancelled.');
+                        }
+                        
+                        hideProgressBar();
+                        document.getElementById('importLoading').classList.remove('active');
+                        syncBtn.disabled = false;
+                        return;
+                    }
+                    
+                    // Continue polling
+                    setTimeout(poll, pollInterval);
+                    
+                } catch (error) {
+                    console.error('Error polling progress:', error);
+                    // Retry after a longer delay on error
+                    setTimeout(poll, pollInterval * 2);
+                }
+            };
+            
+            // Start polling
+            poll();
+        }
+
+        // Update progress UI from queue session data
+        function updateQueueProgress(session) {
+            const percentage = session.progress_percentage || 0;
+            
+            // Update progress bar
+            progressBarFill.style.width = `${percentage}%`;
+            progressPercentage.textContent = `${percentage}%`;
+            
+            // Update counters
+            currentChunkEl.textContent = session.completed_jobs || 0;
+            totalChunksEl.textContent = session.total_jobs || 0;
+            propertiesImported.textContent = session.imported_properties || 0;
+            totalPropertiesEl.textContent = session.total_properties || '...';
+            
+            // Calculate ETA
+            if (session.estimated_remaining) {
+                importETA.textContent = formatETA(session.estimated_remaining);
+            }
+            
+            // Calculate speed
+            if (session.elapsed_seconds && session.imported_properties) {
+                const speed = session.imported_properties / session.elapsed_seconds;
+                importSpeed.textContent = `${speed.toFixed(1)} props/sec`;
+            }
+            
+            // Update status message
+            const statusMessages = {
+                'pending': '⏳ Waiting to start...',
+                'processing': `🔄 Processing... (${session.completed_jobs || 0}/${session.total_jobs || '?'} chunks)`
+            };
+            
+            if (session.split_count) {
+                console.log(`Split info: ${session.split_count} splits, max depth ${session.max_depth_reached || 0}`);
             }
         }
 

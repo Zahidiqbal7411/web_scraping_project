@@ -1176,11 +1176,12 @@ class InternalPropertyController extends Controller
 
     /**
      * Sync/fetch property URLs from Rightmove (merged from PropertyController)
-     * Uses default Bath URL for testing
+     * Now uses recursive splitting for UNLIMITED property import
      */
     public function syncUrls(Request $request = null)
     {
-        set_time_limit(300); // 5 minutes
+        set_time_limit(0); // Unlimited time for large imports
+        ini_set('memory_limit', '4096M'); // 4GB for very large datasets
         
         $baseUrl = 'https://www.rightmove.co.uk/property-for-sale/find.html?searchLocation=Bath%2C+Somerset&useLocationIdentifier=true&locationIdentifier=REGION%5E116&radius=0.0&_includeSSTC=on';
         
@@ -1188,7 +1189,266 @@ class InternalPropertyController extends Controller
             $baseUrl = $request->input('url');
         }
 
-        return $this->scrapeWithAutoSplit($baseUrl);
+        // Use RECURSIVE splitting for unlimited imports
+        return $this->scrapeWithRecursiveSplit($baseUrl);
+    }
+
+    /**
+     * RECURSIVE AUTO-SPLIT: Scrape property URLs with intelligent recursive splitting
+     * This is the main entry point for unlimited property import
+     * 
+     * Algorithm:
+     * 1. Probe total results for the search URL
+     * 2. If ≤1000: standard scrape
+     * 3. If >1000: binary split by price range and recurse
+     * 4. Merge and deduplicate all results
+     * 
+     * @param string $baseUrl The Rightmove search URL
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function scrapeWithRecursiveSplit($baseUrl)
+    {
+        Log::info("=== RECURSIVE AUTO-SPLIT: Starting for URL ===");
+        Log::info("URL: " . $baseUrl);
+        
+        set_time_limit(0);
+        ini_set('memory_limit', '4096M');
+        
+        $startTime = microtime(true);
+        
+        // Initialize tracking arrays
+        $allUrls = [];
+        $seenIds = [];
+        $splitStats = [
+            'total_splits' => 0,
+            'max_depth' => 0,
+            'split_details' => []
+        ];
+        
+        // Extract initial price range from URL (or use defaults)
+        [$currentMin, $currentMax] = $this->extractPriceRangeFromUrl($baseUrl);
+        $minPrice = $currentMin ?? 0;
+        $maxPrice = $currentMax ?? 15000000; // £15M max
+        
+        // Start recursive scraping
+        try {
+            $result = $this->scrapeRecursively(
+                $baseUrl,
+                $minPrice,
+                $maxPrice,
+                0,           // depth
+                10,          // maxDepth
+                $allUrls,
+                $seenIds,
+                $splitStats
+            );
+            
+            $elapsed = round(microtime(true) - $startTime, 2);
+            
+            Log::info("=== RECURSIVE AUTO-SPLIT COMPLETE ===");
+            Log::info("Total unique properties: " . count($allUrls));
+            Log::info("Total splits performed: " . $splitStats['total_splits']);
+            Log::info("Max recursion depth: " . $splitStats['max_depth']);
+            Log::info("Time elapsed: {$elapsed} seconds");
+            
+            return response()->json([
+                'success' => true,
+                'message' => "Recursive split complete: Retrieved " . count($allUrls) . " unique properties",
+                'count' => count($allUrls),
+                'total_result_count' => count($allUrls), // Now represents actual retrieved count
+                'auto_split_used' => $splitStats['total_splits'] > 0,
+                'split_count' => $splitStats['total_splits'],
+                'max_depth_reached' => $splitStats['max_depth'],
+                'split_results' => $splitStats['split_details'],
+                'elapsed_seconds' => $elapsed,
+                'urls' => $allUrls
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error("Recursive split failed: " . $e->getMessage());
+            Log::error($e->getTraceAsString());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Recursive split failed: ' . $e->getMessage(),
+                'partial_count' => count($allUrls),
+                'urls' => $allUrls // Return what we have so far
+            ], 200); // Return 200 to allow partial results
+        }
+    }
+    
+    /**
+     * Recursive function to scrape properties with automatic splitting
+     * 
+     * @param string $baseUrl Original search URL
+     * @param int $minPrice Minimum price for current range
+     * @param int $maxPrice Maximum price for current range
+     * @param int $depth Current recursion depth
+     * @param int $maxDepth Maximum allowed recursion depth
+     * @param array &$allUrls Reference to collected URLs
+     * @param array &$seenIds Reference to seen property IDs for deduplication
+     * @param array &$splitStats Reference to split statistics
+     * @return bool Success status
+     */
+    private function scrapeRecursively(
+        $baseUrl,
+        $minPrice,
+        $maxPrice,
+        $depth,
+        $maxDepth,
+        &$allUrls,
+        &$seenIds,
+        &$splitStats
+    ) {
+        $indent = str_repeat("  ", $depth);
+        $rangeLabel = "£" . number_format($minPrice) . " - £" . number_format($maxPrice);
+        
+        Log::info("{$indent}[Depth {$depth}] Processing range: {$rangeLabel}");
+        
+        // Track max depth
+        if ($depth > $splitStats['max_depth']) {
+            $splitStats['max_depth'] = $depth;
+        }
+        
+        // Build URL with current price range
+        $rangeUrl = $this->buildUrlWithPriceRange($baseUrl, $minPrice, $maxPrice);
+        
+        // Probe to get total results for this range
+        $probe = $this->scrapePropertyUrlsSinglePage($rangeUrl);
+        
+        if (!$probe['success']) {
+            Log::warning("{$indent}[Depth {$depth}] Probe failed for range {$rangeLabel}: " . ($probe['message'] ?? 'Unknown error'));
+            // Try to scrape anyway
+            $probe['total_result_count'] = 0;
+        }
+        
+        $totalResults = (int) str_replace(',', '', $probe['total_result_count'] ?? '0');
+        
+        Log::info("{$indent}[Depth {$depth}] Range {$rangeLabel}: {$totalResults} results");
+        
+        // BASE CASE: Results are under limit, scrape normally
+        if ($totalResults <= 1000 || $depth >= $maxDepth) {
+            if ($depth >= $maxDepth && $totalResults > 1000) {
+                Log::warning("{$indent}[Depth {$depth}] MAX DEPTH REACHED! Scraping what we can ({$totalResults} results, will get ~1000)");
+            }
+            
+            // Standard scrape for this range
+            $response = $this->scrapePropertyUrls($rangeUrl, true);
+            $data = $response->getData(true);
+            
+            if ($data['success'] && !empty($data['urls'])) {
+                $addedCount = 0;
+                
+                foreach ($data['urls'] as $urlData) {
+                    $propId = $urlData['id'] ?? null;
+                    
+                    // Deduplicate by property ID
+                    if ($propId && !in_array($propId, $seenIds)) {
+                        $seenIds[] = $propId;
+                        $allUrls[] = $urlData;
+                        $addedCount++;
+                    } elseif (!$propId) {
+                        // No ID, add with URL-based dedup
+                        $urlKey = md5($urlData['url'] ?? '');
+                        if (!in_array($urlKey, $seenIds)) {
+                            $seenIds[] = $urlKey;
+                            $allUrls[] = $urlData;
+                            $addedCount++;
+                        }
+                    }
+                }
+                
+                Log::info("{$indent}[Depth {$depth}] ✓ Scraped {$rangeLabel}: {$addedCount} new properties (total now: " . count($allUrls) . ")");
+                
+                $splitStats['split_details'][] = [
+                    'range' => $rangeLabel,
+                    'depth' => $depth,
+                    'total_in_range' => $totalResults,
+                    'scraped' => count($data['urls']),
+                    'unique_added' => $addedCount
+                ];
+            } else {
+                Log::warning("{$indent}[Depth {$depth}] No URLs returned for range {$rangeLabel}");
+            }
+            
+            // Delay to avoid rate limiting - REDUCED for faster imports
+            usleep(300000); // 0.3 second delay
+            
+            return true;
+        }
+        
+        // RECURSIVE CASE: Too many results, split the price range
+        $splitStats['total_splits']++;
+        
+        // Calculate midpoint - use weighted split for better distribution
+        // UK property prices cluster at lower ranges, so split at 40% for more balanced chunks
+        $priceSpan = $maxPrice - $minPrice;
+        
+        // Don't split if range is too small (minimum £5000 range)
+        if ($priceSpan < 5000) {
+            Log::warning("{$indent}[Depth {$depth}] Price range too narrow to split ({$priceSpan}). Scraping as-is.");
+            // Scrape what we can
+            $response = $this->scrapePropertyUrls($rangeUrl, true);
+            $data = $response->getData(true);
+            
+            if ($data['success'] && !empty($data['urls'])) {
+                foreach ($data['urls'] as $urlData) {
+                    $propId = $urlData['id'] ?? null;
+                    if ($propId && !in_array($propId, $seenIds)) {
+                        $seenIds[] = $propId;
+                        $allUrls[] = $urlData;
+                    }
+                }
+            }
+            return true;
+        }
+        
+        // Smart midpoint calculation based on typical UK property price distribution
+        // More properties cluster at lower price points
+        $midPrice = $minPrice + (int)($priceSpan * 0.4); // Split at 40% to handle clustering
+        
+        // Round to nearest sensible figure for cleaner URLs
+        if ($midPrice >= 1000000) {
+            $midPrice = round($midPrice / 50000) * 50000; // Round to £50k for £1M+
+        } elseif ($midPrice >= 100000) {
+            $midPrice = round($midPrice / 10000) * 10000; // Round to £10k for £100k+
+        } else {
+            $midPrice = round($midPrice / 5000) * 5000; // Round to £5k for lower
+        }
+        
+        // Ensure midPrice is between min and max
+        $midPrice = max($minPrice + 1000, min($midPrice, $maxPrice - 1000));
+        
+        Log::info("{$indent}[Depth {$depth}] SPLITTING {$rangeLabel} at £" . number_format($midPrice));
+        
+        // RECURSE: Lower half
+        $this->scrapeRecursively(
+            $baseUrl,
+            $minPrice,
+            $midPrice,
+            $depth + 1,
+            $maxDepth,
+            $allUrls,
+            $seenIds,
+            $splitStats
+        );
+        
+        // Small delay between splits - REDUCED for faster imports
+        usleep(500000); // 0.5 second delay
+        
+        // RECURSE: Upper half  
+        $this->scrapeRecursively(
+            $baseUrl,
+            $midPrice,
+            $maxPrice,
+            $depth + 1,
+            $maxDepth,
+            $allUrls,
+            $seenIds,
+            $splitStats
+        );
+        
+        return true;
     }
 
     /**
@@ -1690,8 +1950,8 @@ class InternalPropertyController extends Controller
                 }
                 
                 if ($page < $maxPages - 1) {
-                    Log::info("Waiting 2 seconds before next page...");
-                    sleep(2); // INCREASED: More delay between pages to avoid rate limiting
+                    Log::info("Waiting 0.5 seconds before next page...");
+                    usleep(500000); // REDUCED: 0.5 second delay for faster imports
                 }
             }
             
@@ -1785,6 +2045,176 @@ class InternalPropertyController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    // =====================================================
+    // QUEUE-BASED IMPORT METHODS
+    // These methods use Laravel Jobs for background processing
+    // =====================================================
+
+    /**
+     * Start a queued import for unlimited properties
+     * Dispatches a MasterImportJob which orchestrates the import
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function startQueuedImport(Request $request)
+    {
+        try {
+            $request->validate([
+                'search_id' => 'nullable|integer|exists:saved_searches,id',
+                'url' => 'nullable|url'
+            ]);
+
+            $searchId = $request->input('search_id');
+            $baseUrl = $request->input('url');
+
+            // Get URL from saved search if not provided directly
+            if (!$baseUrl && $searchId) {
+                $search = \App\Models\SavedSearch::find($searchId);
+                if ($search && $search->updates_url) {
+                    $baseUrl = $search->updates_url;
+                }
+            }
+
+            if (!$baseUrl) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No search URL provided. Please provide a URL or select a saved search.'
+                ], 400);
+            }
+
+            Log::info("Starting queued import for URL: {$baseUrl}");
+
+            // Create import session
+            $importSession = \App\Models\ImportSession::create([
+                'saved_search_id' => $searchId,
+                'base_url' => $baseUrl,
+                'status' => \App\Models\ImportSession::STATUS_PENDING,
+            ]);
+
+            // Dispatch the master import job
+            \App\Jobs\MasterImportJob::dispatch($importSession, $baseUrl, $searchId)
+                ->onQueue('imports');
+
+            Log::info("Dispatched MasterImportJob for session {$importSession->id}");
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Import started. Processing in background.',
+                'session_id' => $importSession->id,
+                'status' => $importSession->status,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error("Error starting queued import: " . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to start import: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get the progress of an import session
+     * Frontend should poll this endpoint every few seconds
+     * 
+     * @param int $sessionId
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getImportProgress($sessionId)
+    {
+        try {
+            $session = \App\Models\ImportSession::findOrFail($sessionId);
+
+            return response()->json([
+                'success' => true,
+                'session' => $session->getStatusSummary()
+            ]);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Import session not found'
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error("Error getting import progress: " . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to get import progress'
+            ], 500);
+        }
+    }
+
+    /**
+     * Cancel an import session
+     * Marks the session as cancelled - running jobs will check and stop
+     * 
+     * @param int $sessionId
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function cancelImport($sessionId)
+    {
+        try {
+            $session = \App\Models\ImportSession::findOrFail($sessionId);
+
+            if ($session->isFinished()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Import has already finished.'
+                ], 400);
+            }
+
+            $session->cancel();
+
+            Log::info("Import session {$sessionId} cancelled by user");
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Import cancelled',
+                'session' => $session->getStatusSummary()
+            ]);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Import session not found'
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error("Error cancelling import: " . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to cancel import'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get all active and recent import sessions
+     * 
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getImportSessions()
+    {
+        try {
+            $sessions = \App\Models\ImportSession::orderBy('created_at', 'desc')
+                ->take(20)
+                ->get()
+                ->map(fn($s) => $s->getStatusSummary());
+
+            return response()->json([
+                'success' => true,
+                'sessions' => $sessions
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error("Error getting import sessions: " . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to get import sessions'
             ], 500);
         }
     }

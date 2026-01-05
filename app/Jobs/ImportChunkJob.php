@@ -1,0 +1,260 @@
+<?php
+
+namespace App\Jobs;
+
+use App\Models\ImportSession;
+use App\Models\Url;
+use App\Services\InternalPropertyService;
+use App\Services\RightmoveScraperService;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
+
+/**
+ * ImportChunkJob - Processes a chunk of up to 1000 properties
+ * 
+ * This job scrapes properties from a specific URL/price range,
+ * fetches full property details, and saves them to the database.
+ */
+class ImportChunkJob implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    /**
+     * The number of times the job may be attempted.
+     */
+    public int $tries = 5;
+
+    /**
+     * The number of seconds to wait before retrying.
+     */
+    public int $backoff = 60;
+
+    /**
+     * The number of seconds the job can run before timing out.
+     */
+    public int $timeout = 1800; // 30 minutes per chunk
+
+    /**
+     * Delete the job if its models no longer exist.
+     */
+    public bool $deleteWhenMissingModels = true;
+
+    protected ImportSession $importSession;
+    protected string $chunkUrl;
+    protected int $minPrice;
+    protected int $maxPrice;
+    protected int $estimatedCount;
+    protected ?int $savedSearchId;
+
+    /**
+     * Create a new job instance.
+     */
+    public function __construct(
+        ImportSession $importSession,
+        string $chunkUrl,
+        int $minPrice,
+        int $maxPrice,
+        int $estimatedCount,
+        ?int $savedSearchId = null
+    ) {
+        $this->importSession = $importSession;
+        $this->chunkUrl = $chunkUrl;
+        $this->minPrice = $minPrice;
+        $this->maxPrice = $maxPrice;
+        $this->estimatedCount = $estimatedCount;
+        $this->savedSearchId = $savedSearchId;
+        
+        $this->onQueue('imports');
+    }
+
+    /**
+     * Execute the job.
+     */
+    public function handle(
+        RightmoveScraperService $scraperService,
+        InternalPropertyService $propertyService
+    ): void {
+        $rangeLabel = "£" . number_format($this->minPrice) . " - £" . number_format($this->maxPrice);
+        
+        Log::info("=== CHUNK JOB: Processing {$rangeLabel} for session {$this->importSession->id} ===");
+        Log::info("URL: {$this->chunkUrl}");
+        
+        // Check if session is cancelled
+        $this->importSession->refresh();
+        if ($this->importSession->status === ImportSession::STATUS_CANCELLED) {
+            Log::info("Session cancelled, skipping chunk job");
+            return;
+        }
+        
+        try {
+            // Step 1: Scrape property URLs from search results
+            $urlsData = $scraperService->scrapePropertyUrls($this->chunkUrl);
+            
+            if (empty($urlsData)) {
+                Log::warning("No URLs scraped for range {$rangeLabel}");
+                $this->importSession->incrementCompleted(0, 0);
+                return;
+            }
+            
+            Log::info("Scraped " . count($urlsData) . " property URLs");
+            
+            // Step 2: Save URLs to database
+            $savedCount = 0;
+            $skippedCount = 0;
+            $urlsToFetch = [];
+            
+            foreach ($urlsData as $urlData) {
+                $propertyId = $urlData['id'] ?? null;
+                $propertyUrl = $urlData['url'] ?? null;
+                
+                if (!$propertyUrl) {
+                    continue;
+                }
+                
+                // Check if URL already exists
+                $existing = Url::where('url', $propertyUrl)->first();
+                
+                if ($existing) {
+                    $propertyIdFromDb = $urlData['id'] ?? null;
+                    $propertyExists = DB::table('properties')->where('id', $propertyIdFromDb)->exists();
+                    $hasImages = DB::table('property_images')->where('property_id', $propertyIdFromDb)->exists();
+                    
+                    if ($propertyExists && $hasImages) {
+                        $skippedCount++;
+                        continue;
+                    }
+                }
+                
+                // Save/Update URL record
+                $url = Url::updateOrCreate(
+                    ['url' => $propertyUrl],
+                    [
+                        'rightmove_id' => $propertyId,
+                        'filter_id' => $this->savedSearchId,
+                        'status' => 'pending',
+                        'updated_at' => now()
+                    ]
+                );
+                
+                $urlsToFetch[] = [
+                    'id' => $url->id,
+                    'url' => $propertyUrl,
+                    'rightmove_id' => $propertyId
+                ];
+            }
+            
+            Log::info("Saved " . count($urlsToFetch) . " new URLs, skipped {$skippedCount} existing");
+            
+            // Step 3: Fetch full property details for new URLs
+            if (!empty($urlsToFetch)) {
+                $results = $propertyService->fetchPropertiesConcurrently($urlsToFetch);
+                
+                // Step 4: Save property details to database
+                $importedCount = 0;
+                
+                foreach ($results['properties'] ?? [] as $property) {
+                    try {
+                        $this->saveProperty($property);
+                        $importedCount++;
+                    } catch (\Exception $e) {
+                        Log::warning("Failed to save property: " . $e->getMessage());
+                    }
+                }
+                
+                Log::info("Successfully imported {$importedCount} properties");
+                $savedCount = $importedCount;
+            }
+            
+            // Rate limiting delay between chunks
+            usleep(500000); // 0.5 second
+            
+            // Update session progress
+            $this->importSession->incrementCompleted($savedCount, $skippedCount);
+            
+            Log::info("=== CHUNK JOB COMPLETE: {$rangeLabel} ===");
+            
+        } catch (\Exception $e) {
+            Log::error("Chunk job failed for {$rangeLabel}: " . $e->getMessage());
+            Log::error($e->getTraceAsString());
+            
+            $this->importSession->incrementFailed("Chunk {$rangeLabel}: " . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
+     * Save property to database
+     */
+    protected function saveProperty(array $property): void
+    {
+        // Use upsert to handle duplicates
+        DB::table('properties')->updateOrInsert(
+            ['id' => $property['id'] ?? null],
+            [
+                'location' => $property['address'] ?? null,
+                'house_number' => $property['house_number'] ?? null,
+                'road_name' => $property['road_name'] ?? null,
+                'price' => $property['price'] ?? null,
+                'bedrooms' => $property['bedrooms'] ?? null,
+                'bathrooms' => $property['bathrooms'] ?? null,
+                'property_type' => $property['property_type'] ?? null,
+                'size' => $property['size'] ?? null,
+                'tenure' => $property['tenure'] ?? null,
+                'council_tax' => $property['council_tax'] ?? null,
+                'parking' => $property['parking'] ?? null,
+                'garden' => $property['garden'] ?? null,
+                'accessibility' => $property['accessibility'] ?? null,
+                'ground_rent' => $property['ground_rent'] ?? null,
+                'annual_service_charge' => $property['annual_service_charge'] ?? null,
+                'lease_length' => $property['lease_length'] ?? null,
+                'key_features' => json_encode($property['key_features'] ?? []),
+                'description' => $property['description'] ?? null,
+                'sold_link' => $property['sold_link'] ?? null,
+                'filter_id' => $this->savedSearchId,
+                'updated_at' => now(),
+                'created_at' => now(),
+            ]
+        );
+
+        // Save Images
+        if (!empty($property['images'])) {
+            $propertyId = $property['id'];
+            
+            // Delete existing images for this property to avoid duplicates
+            DB::table('property_images')->where('property_id', $propertyId)->delete();
+            
+            foreach ($property['images'] as $imageLink) {
+                DB::table('property_images')->insert([
+                    'property_id' => $propertyId,
+                    'image_link' => $imageLink,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Handle a job failure.
+     */
+    public function failed(\Throwable $exception): void
+    {
+        $rangeLabel = "£" . number_format($this->minPrice) . " - £" . number_format($this->maxPrice);
+        Log::error("ImportChunkJob failed permanently for {$rangeLabel}: " . $exception->getMessage());
+        $this->importSession->incrementFailed("Chunk {$rangeLabel} failed: " . $exception->getMessage());
+    }
+
+    /**
+     * Calculate the number of seconds to wait before retrying.
+     */
+    public function retryAfter(): int
+    {
+        // Exponential backoff: 30s, 60s, 120s
+        return $this->backoff * pow(2, $this->attempts() - 1);
+    }
+}

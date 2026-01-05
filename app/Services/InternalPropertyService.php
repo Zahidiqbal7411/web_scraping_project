@@ -77,10 +77,10 @@ class InternalPropertyService
                     $propId = $matches[1];
                     $dbProperty = \App\Models\Property::with('images')->where('id', $propId)->first();
                     
-                    if ($dbProperty) {
+                    if ($dbProperty && $dbProperty->images->count() > 0) {
                         // Always use DB record if found, even if incomplete
                         // We trust the import process to have done its best
-                        Log::info("Found property in DB: {$propId}");
+                        Log::info("Found property with images in DB: {$propId}");
                         // Construct data format matching what parsePropertyFromHtml returns
                         $images = $dbProperty->images->pluck('image_link')->toArray();
                         $keyFeatures = json_decode($dbProperty->key_features, true) ?? [];

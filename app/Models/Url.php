@@ -6,7 +6,13 @@ use Illuminate\Database\Eloquent\Model;
 
 class Url extends Model
 {
-    protected $fillable = ['url', 'filter_id'];
+    protected $fillable = [
+        'url',
+        'filter_id',
+        'rightmove_id',
+        'saved_search_id',
+        'status'
+    ];
 
     public function savedSearch()
     {

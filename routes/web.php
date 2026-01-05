@@ -27,6 +27,12 @@ Route::middleware('auth')->group(function () {
         Route::post('/fetch-all', [InternalPropertyController::class, 'fetchAllProperties'])->name('fetch-all');
         Route::post('/import-sold-details', [InternalPropertyController::class, 'importSoldPropertyDetails'])->name('import-sold-details');
         Route::get('/search/{id}', [InternalPropertyController::class, 'show'])->name('search');
+        
+        // Queue-based import routes (unlimited properties)
+        Route::post('/import/start', [InternalPropertyController::class, 'startQueuedImport'])->name('import.start');
+        Route::get('/import/progress/{session}', [InternalPropertyController::class, 'getImportProgress'])->name('import.progress');
+        Route::post('/import/cancel/{session}', [InternalPropertyController::class, 'cancelImport'])->name('import.cancel');
+        Route::get('/import/sessions', [InternalPropertyController::class, 'getImportSessions'])->name('import.sessions');
     });
 
     // Saved Search / Filters Routes
