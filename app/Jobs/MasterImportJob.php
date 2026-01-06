@@ -37,7 +37,8 @@ class MasterImportJob implements ShouldQueue
      */
     public bool $deleteWhenMissingModels = true;
 
-    protected ImportSession $importSession;
+    // Store session ID instead of model for reliability on server
+    protected int $importSessionId;
     protected string $baseUrl;
     protected ?int $savedSearchId;
 
@@ -46,7 +47,8 @@ class MasterImportJob implements ShouldQueue
      */
     public function __construct(ImportSession $importSession, string $baseUrl, ?int $savedSearchId = null)
     {
-        $this->importSession = $importSession;
+        // Store ID instead of model for better reliability on cron-based systems
+        $this->importSessionId = $importSession->id;
         $this->baseUrl = $baseUrl;
         $this->savedSearchId = $savedSearchId;
         
@@ -59,11 +61,20 @@ class MasterImportJob implements ShouldQueue
      */
     public function handle(RightmoveScraperService $scraperService): void
     {
-        Log::info("=== MASTER IMPORT JOB: Starting for session {$this->importSession->id} ===");
+        // IMPORTANT: Fetch session fresh from database (not serialized)
+        // This ensures progress updates work on server with cron-based queue
+        $importSession = ImportSession::find($this->importSessionId);
+        
+        if (!$importSession) {
+            Log::error("Import session {$this->importSessionId} not found, aborting master job");
+            return;
+        }
+        
+        Log::info("=== MASTER IMPORT JOB: Starting for session {$this->importSessionId} ===");
         Log::info("URL: {$this->baseUrl}");
         
         // Mark session as processing
-        $this->importSession->start();
+        $importSession->start();
         
         try {
             // Extract initial price range from URL (or use defaults)
@@ -108,18 +119,20 @@ class MasterImportJob implements ShouldQueue
             }
             
             // Update session with split stats
-            $this->importSession->updateSplitStats(
+            $importSession->updateSplitStats(
                 $splitStats['total_splits'],
                 $splitStats['max_depth'],
                 $splitStats['split_details']
             );
             
-            // Estimate total properties (rough estimate)
-            $totalEstimated = count($allChunks) * 500;
-            $this->importSession->setTotalProperties($totalEstimated);
+            // Get ACTUAL total count from source website instead of estimation
+            // This ensures the progress bar shows the correct number
+            $actualTotalCount = $scraperService->probeResultCount($this->baseUrl);
+            $importSession->setTotalProperties($actualTotalCount);
+            Log::info("=== MASTER: Actual total properties from source: {$actualTotalCount} ===");
             
             // Add jobs count to session
-            $this->importSession->addJobs(count($allChunks));
+            $importSession->addJobs(count($allChunks));
             
             Log::info("=== MASTER: Dispatching " . count($allChunks) . " chunk jobs ===");
             
@@ -128,7 +141,7 @@ class MasterImportJob implements ShouldQueue
                 $delay = $index * 30; // 30 seconds between each job (faster than before)
                 
                 ImportChunkJob::dispatch(
-                    $this->importSession,
+                    $importSession,
                     $chunk['url'],
                     $chunk['min_price'],
                     $chunk['max_price'],
@@ -141,13 +154,17 @@ class MasterImportJob implements ShouldQueue
                     number_format($chunk['max_price']) . " (delay: {$delay}s)");
             }
             
-            Log::info("=== MASTER IMPORT JOB: Completed dispatching for session {$this->importSession->id} ===");
+            Log::info("=== MASTER IMPORT JOB: Completed dispatching for session {$this->importSessionId} ===");
             
         } catch (\Exception $e) {
             Log::error("Master import job failed: " . $e->getMessage());
             Log::error($e->getTraceAsString());
             
-            $this->importSession->markFailed($e->getMessage());
+            // Fetch session fresh for error handling
+            $session = ImportSession::find($this->importSessionId);
+            if ($session) {
+                $session->markFailed($e->getMessage());
+            }
             throw $e;
         }
     }
@@ -365,6 +382,11 @@ class MasterImportJob implements ShouldQueue
     public function failed(\Throwable $exception): void
     {
         Log::error("MasterImportJob failed permanently: " . $exception->getMessage());
-        $this->importSession->markFailed("Master job failed: " . $exception->getMessage());
+        
+        // Fetch session fresh from database for failure handling
+        $session = ImportSession::find($this->importSessionId);
+        if ($session) {
+            $session->markFailed("Master job failed: " . $exception->getMessage());
+        }
     }
 }

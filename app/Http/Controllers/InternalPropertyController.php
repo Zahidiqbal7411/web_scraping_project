@@ -1175,6 +1175,82 @@ class InternalPropertyController extends Controller
     }
 
     /**
+     * Start a queued sold properties import
+     * Dispatches ImportSoldJob for each property that needs sold data
+     * This is the async alternative to processSoldLinks for bulk imports
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function startQueuedSoldImport(Request $request)
+    {
+        try {
+            $propertyIds = $request->input('property_ids', []);
+            $searchId = $request->input('search_id');
+            
+            // If property_ids provided, use those
+            if (!empty($propertyIds) && is_array($propertyIds)) {
+                $properties = \App\Models\Property::whereIn('id', $propertyIds)->get();
+            } elseif ($searchId) {
+                // Get all properties for this search that don't have sold data
+                $search = \App\Models\SavedSearch::find($searchId);
+                if (!$search) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Search not found'
+                    ], 404);
+                }
+                
+                // Get properties by location/search criteria that need sold data
+                $properties = \App\Models\Property::whereDoesntHave('soldProperties')->get();
+            } else {
+                // Get all properties that need sold data (no sold_properties)
+                $properties = \App\Models\Property::whereDoesntHave('soldProperties')->get();
+            }
+            
+            $count = $properties->count();
+
+            if ($count === 0) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'All properties already have sold data!',
+                    'jobs_dispatched' => 0
+                ]);
+            }
+
+            Log::info("Starting queued sold import for {$count} properties");
+
+            // Auto-start queue worker if not running
+            $this->startQueueWorkerIfNeeded();
+
+            // Dispatch jobs with staggered delays (faster: 2 seconds apart)
+            foreach ($properties as $index => $property) {
+                $delay = $index * 2; // 2 seconds between each job
+                
+                \App\Jobs\ImportSoldJob::dispatch($property->id)
+                    ->onQueue('imports')
+                    ->delay(now()->addSeconds($delay));
+            }
+            
+            Log::info("Dispatched {$count} ImportSoldJob(s) to queue");
+
+            return response()->json([
+                'success' => true,
+                'message' => "Dispatched {$count} sold import jobs. Processing in background.",
+                'jobs_dispatched' => $count,
+                'estimated_time_seconds' => $count * 5 // Rough estimate
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error("Error starting queued sold import: " . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to start sold import: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Sync/fetch property URLs from Rightmove (merged from PropertyController)
      * Now uses recursive splitting for UNLIMITED property import
      */
@@ -2055,6 +2131,63 @@ class InternalPropertyController extends Controller
     // =====================================================
 
     /**
+     * Check if a queue worker process is already running
+     * 
+     * @return bool
+     */
+    private function isQueueWorkerRunning(): bool
+    {
+        if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+            // Windows: check for php.exe processes and look for queue:work
+            exec('wmic process where "name=\'php.exe\'" get commandline 2>&1', $output);
+            foreach ($output as $line) {
+                if (strpos($line, 'queue:work') !== false) {
+                    return true;
+                }
+            }
+            return false;
+        } else {
+            // Linux/Mac: use pgrep
+            exec('pgrep -f "artisan queue:work"', $output, $returnVar);
+            return $returnVar === 0;
+        }
+    }
+
+    /**
+     * Start the queue worker as a background process if not already running
+     * Uses popen() to spawn a detached process
+     * 
+     * @return bool Whether a new worker was started
+     */
+    private function startQueueWorkerIfNeeded(): bool
+    {
+        if ($this->isQueueWorkerRunning()) {
+            Log::info("Queue worker already running, skipping auto-start");
+            return false;
+        }
+        
+        $projectPath = base_path();
+        
+        if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+            // Windows: use start /B to run in background
+            $command = "cd /d \"{$projectPath}\" && start /B php artisan queue:work --queue=imports";
+            pclose(popen($command, 'r'));
+            Log::info("Queue worker started automatically via popen() on Windows");
+        } else {
+            // Linux/Mac: use nohup and redirect output
+            $logFile = storage_path('logs/queue-worker.log');
+            $command = "cd \"{$projectPath}\" && nohup php artisan queue:work --queue=imports >> \"{$logFile}\" 2>&1 &";
+            exec($command);
+            Log::info("Queue worker started automatically via exec() on Linux/Mac");
+        }
+        
+        // Small delay to allow process to start
+        usleep(500000); // 0.5 seconds
+        
+        return true;
+    }
+
+    /**
      * Start a queued import for unlimited properties
      * Dispatches a MasterImportJob which orchestrates the import
      * 
@@ -2089,6 +2222,12 @@ class InternalPropertyController extends Controller
 
             Log::info("Starting queued import for URL: {$baseUrl}");
 
+            // Auto-start queue worker if not running
+            $workerStarted = $this->startQueueWorkerIfNeeded();
+            if ($workerStarted) {
+                Log::info("Queue worker was auto-started for this import");
+            }
+
             // Create import session
             $importSession = \App\Models\ImportSession::create([
                 'saved_search_id' => $searchId,
@@ -2104,9 +2243,12 @@ class InternalPropertyController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Import started. Processing in background.',
+                'message' => $workerStarted 
+                    ? 'Import started. Queue worker was auto-started.'
+                    : 'Import started. Processing in background.',
                 'session_id' => $importSession->id,
                 'status' => $importSession->status,
+                'worker_started' => $workerStarted,
             ]);
 
         } catch (\Exception $e) {

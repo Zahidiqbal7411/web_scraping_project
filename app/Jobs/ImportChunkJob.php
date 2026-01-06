@@ -44,7 +44,8 @@ class ImportChunkJob implements ShouldQueue
      */
     public bool $deleteWhenMissingModels = true;
 
-    protected ImportSession $importSession;
+    // Store session ID instead of model for reliability on server
+    protected int $importSessionId;
     protected string $chunkUrl;
     protected int $minPrice;
     protected int $maxPrice;
@@ -62,7 +63,8 @@ class ImportChunkJob implements ShouldQueue
         int $estimatedCount,
         ?int $savedSearchId = null
     ) {
-        $this->importSession = $importSession;
+        // Store ID instead of model for better reliability on cron-based systems
+        $this->importSessionId = $importSession->id;
         $this->chunkUrl = $chunkUrl;
         $this->minPrice = $minPrice;
         $this->maxPrice = $maxPrice;
@@ -71,6 +73,7 @@ class ImportChunkJob implements ShouldQueue
         
         $this->onQueue('imports');
     }
+
 
     /**
      * Execute the job.
@@ -81,12 +84,20 @@ class ImportChunkJob implements ShouldQueue
     ): void {
         $rangeLabel = "£" . number_format($this->minPrice) . " - £" . number_format($this->maxPrice);
         
-        Log::info("=== CHUNK JOB: Processing {$rangeLabel} for session {$this->importSession->id} ===");
+        // IMPORTANT: Fetch session fresh from database (not serialized)
+        // This ensures progress updates work on server with cron-based queue
+        $importSession = ImportSession::find($this->importSessionId);
+        
+        if (!$importSession) {
+            Log::error("Import session {$this->importSessionId} not found, skipping job");
+            return;
+        }
+        
+        Log::info("=== CHUNK JOB: Processing {$rangeLabel} for session {$this->importSessionId} ===");
         Log::info("URL: {$this->chunkUrl}");
         
         // Check if session is cancelled
-        $this->importSession->refresh();
-        if ($this->importSession->status === ImportSession::STATUS_CANCELLED) {
+        if ($importSession->status === ImportSession::STATUS_CANCELLED) {
             Log::info("Session cancelled, skipping chunk job");
             return;
         }
@@ -97,7 +108,7 @@ class ImportChunkJob implements ShouldQueue
             
             if (empty($urlsData)) {
                 Log::warning("No URLs scraped for range {$rangeLabel}");
-                $this->importSession->incrementCompleted(0, 0);
+                $importSession->incrementCompleted(0, 0);
                 return;
             }
             
@@ -173,8 +184,8 @@ class ImportChunkJob implements ShouldQueue
             // Rate limiting delay between chunks
             usleep(500000); // 0.5 second
             
-            // Update session progress
-            $this->importSession->incrementCompleted($savedCount, $skippedCount);
+            // Update session progress - fetch fresh to ensure we have latest data
+            $importSession->incrementCompleted($savedCount, $skippedCount);
             
             Log::info("=== CHUNK JOB COMPLETE: {$rangeLabel} ===");
             
@@ -182,7 +193,11 @@ class ImportChunkJob implements ShouldQueue
             Log::error("Chunk job failed for {$rangeLabel}: " . $e->getMessage());
             Log::error($e->getTraceAsString());
             
-            $this->importSession->incrementFailed("Chunk {$rangeLabel}: " . $e->getMessage());
+            // Fetch session fresh for error handling
+            $session = ImportSession::find($this->importSessionId);
+            if ($session) {
+                $session->incrementFailed("Chunk {$rangeLabel}: " . $e->getMessage());
+            }
             throw $e;
         }
     }
@@ -246,7 +261,12 @@ class ImportChunkJob implements ShouldQueue
     {
         $rangeLabel = "£" . number_format($this->minPrice) . " - £" . number_format($this->maxPrice);
         Log::error("ImportChunkJob failed permanently for {$rangeLabel}: " . $exception->getMessage());
-        $this->importSession->incrementFailed("Chunk {$rangeLabel} failed: " . $exception->getMessage());
+        
+        // Fetch session fresh from database for failure handling
+        $session = ImportSession::find($this->importSessionId);
+        if ($session) {
+            $session->incrementFailed("Chunk {$rangeLabel} failed: " . $exception->getMessage());
+        }
     }
 
     /**

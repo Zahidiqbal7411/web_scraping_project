@@ -1734,8 +1734,12 @@
         <!-- Import Progress Bar -->
         <div class="import-progress-container" id="importProgress">
             <div class="progress-header">
-                <span class="progress-title">Importing Properties</span>
-                <span class="progress-stats">Chunk <span id="currentChunk">0</span> of <span id="totalChunks">0</span></span>
+                <span class="progress-title" id="progressTitle">Importing Properties</span>
+                <span class="progress-stats" id="progressStats">Chunk <span id="currentChunk">0</span> of <span id="totalChunks">0</span></span>
+            </div>
+            <div class="progress-status-message" id="progressStatusMessage" style="display: none; padding: 0.75rem; margin-bottom: 1rem; background: linear-gradient(135deg, #fef3c7, #fde68a); border-radius: 8px; color: #92400e; font-size: 0.9rem; text-align: center;">
+                <span class="status-icon" style="margin-right: 0.5rem;">⏳</span>
+                <span id="statusMessageText">Waiting for queue worker to start...</span>
             </div>
             <div class="progress-bar-wrapper">
                 <div class="progress-bar-fill" id="progressBarFill"></div>
@@ -2097,38 +2101,80 @@
         }
 
         // Update progress UI from queue session data
+        // Works for both LOCAL (immediate) and SERVER (cron-based) environments
         function updateQueueProgress(session) {
             const percentage = session.progress_percentage || 0;
+            const totalJobs = session.total_jobs || 0;
+            const completedJobs = session.completed_jobs || 0;
+            const status = session.status || 'pending';
             
-            // Update progress bar
-            progressBarFill.style.width = `${percentage}%`;
-            progressPercentage.textContent = `${percentage}%`;
+            // Get UI elements
+            const progressTitle = document.getElementById('progressTitle');
+            const progressStats = document.getElementById('progressStats');
+            const progressStatusMessage = document.getElementById('progressStatusMessage');
+            const statusMessageText = document.getElementById('statusMessageText');
             
-            // Update counters
-            currentChunkEl.textContent = session.completed_jobs || 0;
-            totalChunksEl.textContent = session.total_jobs || 0;
-            propertiesImported.textContent = session.imported_properties || 0;
-            totalPropertiesEl.textContent = session.total_properties || '...';
-            
-            // Calculate ETA
-            if (session.estimated_remaining) {
-                importETA.textContent = formatETA(session.estimated_remaining);
+            // WAITING STATE: When jobs haven't been dispatched yet (server cron delay)
+            if (status === 'pending' || (status === 'processing' && totalJobs === 0)) {
+                // Show waiting message (important for cPanel where cron runs every minute)
+                progressStatusMessage.style.display = 'block';
+                statusMessageText.innerHTML = '⏳ <strong>Waiting for queue worker...</strong> Jobs will start processing within 1 minute (server cron). Please wait.';
+                progressTitle.textContent = 'Starting Import...';
+                progressStats.innerHTML = '<span style="color: #d97706;">Queued, waiting...</span>';
+                
+                // Show indeterminate progress
+                progressBarFill.style.width = '100%';
+                progressBarFill.style.background = 'linear-gradient(90deg, #fbbf24, #f59e0b, #fbbf24)';
+                progressBarFill.style.animation = 'shimmer 1.5s infinite linear';
+                progressPercentage.textContent = '...';
+                
+                // Hide speed/ETA since nothing started yet
+                importSpeed.textContent = '';
+                importETA.textContent = '';
+                propertiesImported.textContent = '0';
+                totalPropertiesEl.textContent = 'estimating...';
+                
+            } else if (status === 'processing' && totalJobs > 0) {
+                // PROCESSING STATE: Jobs are running
+                progressStatusMessage.style.display = 'none';
+                progressTitle.textContent = 'Importing Properties';
+                
+                // Reset progress bar to normal style
+                progressBarFill.style.background = 'linear-gradient(90deg, var(--primary), var(--secondary))';
+                progressBarFill.style.width = `${percentage}%`;
+                progressPercentage.textContent = `${percentage}%`;
+                
+                // Update counters
+                currentChunkEl.textContent = completedJobs;
+                totalChunksEl.textContent = totalJobs;
+                propertiesImported.textContent = session.imported_properties || 0;
+                totalPropertiesEl.textContent = session.total_properties || '...';
+                
+                // Calculate ETA
+                if (session.estimated_remaining) {
+                    importETA.textContent = formatETA(session.estimated_remaining);
+                } else {
+                    importETA.textContent = '';
+                }
+                
+                // Calculate speed
+                if (session.elapsed_seconds && session.imported_properties) {
+                    const speed = session.imported_properties / session.elapsed_seconds;
+                    importSpeed.textContent = `${speed.toFixed(1)} props/sec`;
+                } else {
+                    importSpeed.textContent = '';
+                }
+                
+            } else {
+                // COMPLETED/FAILED STATE
+                progressStatusMessage.style.display = 'none';
             }
             
-            // Calculate speed
-            if (session.elapsed_seconds && session.imported_properties) {
-                const speed = session.imported_properties / session.elapsed_seconds;
-                importSpeed.textContent = `${speed.toFixed(1)} props/sec`;
-            }
-            
-            // Update status message
-            const statusMessages = {
-                'pending': '⏳ Waiting to start...',
-                'processing': `🔄 Processing... (${session.completed_jobs || 0}/${session.total_jobs || '?'} chunks)`
-            };
+            // Log for debugging
+            console.log(`[Progress] Status: ${status}, Jobs: ${completedJobs}/${totalJobs}, Properties: ${session.imported_properties || 0}`);
             
             if (session.split_count) {
-                console.log(`Split info: ${session.split_count} splits, max depth ${session.max_depth_reached || 0}`);
+                console.log(`[Progress] Split info: ${session.split_count} splits, max depth ${session.max_depth_reached || 0}`);
             }
         }
 
@@ -2541,7 +2587,7 @@
             }
         }
 
-        // Bulk import sold data for properties missing it
+        // Bulk import sold data for properties missing it - QUEUE-BASED (fast!)
         async function fetchRemainingSoldData() {
             const btn = document.getElementById('headerImportSoldBtn');
             if (!btn || btn.disabled) return;
@@ -2557,54 +2603,66 @@
             const originalContent = btn.innerHTML;
             
             try {
-                showAlert('success', `Starting bulk import of sold data for ${propsWithoutSold.length} properties...`);
+                btn.innerHTML = `
+                    <span class="spinner-sm" style="display:inline-block; width:12px; height:12px; border:2px solid currentColor; border-top-color:transparent; border-radius:50%; animation:spin 1s linear infinite;"></span>
+                    Dispatching ${propsWithoutSold.length} jobs...
+                `;
                 
-                let processed = 0;
-                let foundTotal = 0;
+                // Get all property IDs that need sold data
+                const propertyIds = propsWithoutSold.map(p => p.id);
+                
+                // Send ALL property IDs to the queue endpoint at once
+                const response = await fetch('/internal-properties/import/sold', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                    },
+                    body: JSON.stringify({ property_ids: propertyIds })
+                });
 
-                for (const prop of propsWithoutSold) {
-                    btn.innerHTML = `
-                        <span class="spinner-sm" style="display:inline-block; width:12px; height:12px; border:2px solid currentColor; border-top-color:transparent; border-radius:50%; animation:spin 1s linear infinite;"></span>
-                        Importing ${processed + 1}/${propsWithoutSold.length}...
-                    `;
-
-                    try {
-                        const response = await fetch('/internal-properties/process-sold', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'Accept': 'application/json',
-                                'X-CSRF-TOKEN': '{{ csrf_token() }}'
-                            },
-                            body: JSON.stringify({ property_id: prop.id })
-                        });
-
-                        const data = await response.json();
-                        
-                        if (data.success && data.property) {
-                            const idx = loadedProperties.findIndex(p => p.id == prop.id);
-                            if (idx !== -1) {
-                                loadedProperties[idx] = data.property;
-                                updatePropertyCard(data.property);
-                                foundTotal += data.property.sold_properties?.length || 0;
-                            }
+                const data = await response.json();
+                
+                if (data.success) {
+                    const jobCount = data.jobs_dispatched || 0;
+                    const estTime = data.estimated_time_seconds || (jobCount * 5);
+                    const estMins = Math.ceil(estTime / 60);
+                    
+                    // Calculate refresh time (minimum 30 seconds, based on job count)
+                    const refreshSeconds = Math.min(Math.max(30, jobCount * 2), 300); // 30s to 5 mins max
+                    
+                    showAlert('success', `✅ Dispatched ${jobCount} sold import jobs! Page will auto-refresh in ${refreshSeconds}s to show results.`);
+                    
+                    // Start countdown and auto-refresh
+                    let countdown = refreshSeconds;
+                    const countdownInterval = setInterval(() => {
+                        countdown--;
+                        if (countdown > 0) {
+                            btn.innerHTML = `
+                                <span style="color: #10b981;">⏳</span>
+                                Refreshing in ${countdown}s...
+                            `;
+                        } else {
+                            clearInterval(countdownInterval);
+                            btn.innerHTML = `
+                                <span class="spinner-sm" style="display:inline-block; width:12px; height:12px; border:2px solid currentColor; border-top-color:transparent; border-radius:50%; animation:spin 1s linear infinite;"></span>
+                                Reloading...
+                            `;
+                            // Refresh the page to show updated sold data
+                            window.location.reload();
                         }
-                    } catch (err) {
-                        console.error(`Error importing sold data for ${prop.id}:`, err);
-                    }
-
-                    processed++;
+                    }, 1000);
+                    
+                } else {
+                    throw new Error(data.message || 'Failed to start sold import');
                 }
-
-                showAlert('success', `Bulk import complete! Processed ${processed} properties, found ${foundTotal} sold records.`);
-                autoShowSoldImportBtn();
 
             } catch (error) {
                 console.error('Bulk import error:', error);
                 showAlert('error', 'An error occurred during bulk import: ' + error.message);
-            } finally {
-                btn.disabled = false;
                 btn.innerHTML = originalContent;
+                btn.disabled = false;
             }
         }
         

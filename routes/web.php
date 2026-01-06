@@ -33,6 +33,7 @@ Route::middleware('auth')->group(function () {
         Route::get('/import/progress/{session}', [InternalPropertyController::class, 'getImportProgress'])->name('import.progress');
         Route::post('/import/cancel/{session}', [InternalPropertyController::class, 'cancelImport'])->name('import.cancel');
         Route::get('/import/sessions', [InternalPropertyController::class, 'getImportSessions'])->name('import.sessions');
+        Route::post('/import/sold', [InternalPropertyController::class, 'startQueuedSoldImport'])->name('import.sold');
     });
 
     // Saved Search / Filters Routes
