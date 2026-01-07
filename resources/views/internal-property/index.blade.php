@@ -1732,7 +1732,8 @@
         <div class="alert alert-error" id="errorAlert"></div>
 
         <!-- Import Progress Bar -->
-        <div class="import-progress-container" id="importProgress">
+        <!-- Import Progress Bar - HIDDEN AS REQUESTED -->
+        <div class="import-progress-container" id="importProgress" style="display: none !important;">
             <div class="progress-header">
                 <span class="progress-title" id="progressTitle">Importing Properties</span>
                 <span class="progress-stats" id="progressStats">Chunk <span id="currentChunk">0</span> of <span id="totalChunks">0</span></span>
@@ -1762,6 +1763,12 @@
         <div class="loading" id="importLoading" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(5, 150, 105, 0.1));">
             <div class="spinner" style="border-top-color: #10b981;"></div>
             <p style="color: #10b981; font-weight: 600;">Fetching data from source website...</p>
+            
+            <!-- Simple Count Display -->
+            <div id="simpleImportStats" style="margin-top: 0.8rem; font-weight: 700; font-size: 1.1rem; color: #047857;">
+                <span id="simpleLoadedCount">0</span> / <span id="simpleTotalCount">...</span> properties
+            </div>
+            
             <p style="color: var(--text-secondary); font-size: 0.8rem; margin-top: 0.5rem;">This may take several minutes for large datasets</p>
         </div>
 
@@ -1774,6 +1781,7 @@
 
         <!-- Properties Grid -->
         <div class="properties-grid" id="propertiesGrid"></div>
+    </div> <!-- End of container -->
 @endsection
 
 @section('scripts')
@@ -1854,9 +1862,39 @@
 
         // Load properties on startup
         document.addEventListener('DOMContentLoaded', async () => {
+            // Check for any active background imports first
+            await checkActiveImports();
+            
             // On page load, try to load complete property data from database
             await loadFromDatabaseOnStartup();
         });
+
+        // Check for any active background imports
+        async function checkActiveImports() {
+            try {
+                const response = await fetch('/internal-properties/import/sessions', {
+                    headers: {
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                });
+                
+                if (!response.ok) return;
+                
+                const data = await response.json();
+                if (data.success && data.sessions && data.sessions.length > 0) {
+                    // Find most recent active session
+                    const activeSession = data.sessions.find(s => s.is_running);
+                    
+                    if (activeSession) {
+                        console.log(`🔍 Active import found (Session #${activeSession.id}). Restoring banner...`);
+                        showImportStartedBanner(activeSession.id);
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking active imports:', error);
+            }
+        }
 
         // Load full property data from database on page startup
         async function loadFromDatabaseOnStartup() {
@@ -1877,7 +1915,10 @@
                 
                 // Show stats bar and initial data
                 statsBar.style.display = 'flex';
-                totalCount.textContent = data.total;
+                
+                // If loaded is more than total (due to background imports), sync them for visual consistency
+                const displayTotal = Math.max(data.total, data.properties.length);
+                totalCount.textContent = displayTotal;
                 loadedCount.textContent = data.properties.length;
                 
                 loadedProperties = data.properties;
@@ -1895,27 +1936,51 @@
                 // If there are more pages, load them in background
                 if (data.has_more) {
                     console.log(`Loading remaining ${data.total_pages - 1} pages in background...`);
-                    showAlert('success', `Loading remaining pages... Please wait.`);
+                    showAlert('success', `Loading remaining pages (${data.total_pages - 1} more)... Please wait.`);
                     
+                    let failedPages = [];
                     for (let page = 2; page <= data.total_pages; page++) {
-                        const pageData = await loadPropertiesPage(page);
-                        if (pageData && pageData.properties) {
-                            // Debug: Check sold data on this page
-                            const withSold = pageData.properties.filter(p => p.sold_properties && p.sold_properties.length > 0).length;
-                            console.log(`✓ Page ${page}: ${pageData.properties.length} properties, ${withSold} with sold data`);
+                        try {
+                            const pageData = await loadPropertiesPage(page);
+                            if (pageData && pageData.properties && pageData.properties.length > 0) {
+                                // Debug: Check sold data on this page
+                                const withSold = pageData.properties.filter(p => p.sold_properties && p.sold_properties.length > 0).length;
+                                console.log(`✓ Page ${page}/${data.total_pages}: ${pageData.properties.length} properties, ${withSold} with sold data`);
+                                
+                                loadedProperties = loadedProperties.concat(pageData.properties);
+                                propertyUrls = propertyUrls.concat(pageData.properties.map(p => ({ url: p.url, id: p.id })));
+                                
+                                // Update loaded count progressively
+                                loadedCount.textContent = loadedProperties.length;
+                                
+                                // Update display every 5 pages for better UX
+                                if (page % 5 === 0) {
+                                    displayProperties(loadedProperties);
+                                }
+                            } else {
+                                console.warn(`Page ${page} returned no properties`);
+                                failedPages.push(page);
+                            }
                             
-                            loadedProperties = loadedProperties.concat(pageData.properties);
-                            propertyUrls = propertyUrls.concat(pageData.properties.map(p => ({ url: p.url, id: p.id })));
+                            // Small delay between requests to avoid overwhelming the server
+                            await new Promise(resolve => setTimeout(resolve, 100));
                             
-                            // Update loaded count progressively
-                            loadedCount.textContent = loadedProperties.length;
+                        } catch (pageError) {
+                            console.error(`Error loading page ${page}:`, pageError);
+                            failedPages.push(page);
+                            // Continue loading other pages despite error
                         }
                     }
                     
-                    // Now display with all data loaded
-                    console.log(`All pages loaded. Total: ${loadedProperties.length} properties`);
+                    // Final display with all loaded data
+                    console.log(`All pages processed. Total loaded: ${loadedProperties.length} properties`);
                     displayProperties(loadedProperties);
-                    showAlert('success', `All ${loadedProperties.length} properties loaded with sold data!`);
+                    
+                    if (failedPages.length > 0) {
+                        showAlert('error', `Loaded ${loadedProperties.length} properties. ${failedPages.length} pages failed to load.`);
+                    } else {
+                        showAlert('success', `All ${loadedProperties.length} properties loaded!`);
+                    }
                 }
                 
             } catch (error) {
@@ -1932,8 +1997,8 @@
         async function loadPropertiesPage(page) {
             try {
                 const url = window.searchContext 
-                    ? `/internal-properties/load?search_id=${window.searchContext.id}&page=${page}&per_page=999999` 
-                    : `/internal-properties/load?page=${page}&per_page=999999`;
+                    ? `/internal-properties/load?search_id=${window.searchContext.id}&page=${page}&per_page=50` 
+                    : `/internal-properties/load?page=${page}&per_page=50`;
                 
                 console.log(`Loading page ${page} from:`, url);
                 
@@ -1977,11 +2042,11 @@
                 successAlert.classList.remove('active');
                 errorAlert.classList.remove('active');
                 
-                // Show IMPORT loader (green - for source website)
-                importLoading.classList.add('active');
+                // Don't show loader - we'll show banner instead after job is started
+                // importLoading.classList.add('active');
                 syncBtn.disabled = true;
 
-                showAlert('success', '🚀 Starting background import... This runs in the queue for unlimited properties.');
+                showAlert('info', '🚀 Starting background import...');
                 
                 // Start the queued import
                 const startResponse = await fetch('/internal-properties/import/start', {
@@ -2017,13 +2082,13 @@
 
                 const sessionId = startData.session_id;
                 console.log(`✅ Import session started: ${sessionId}`);
-                showAlert('success', `📦 Import job dispatched to queue (Session #${sessionId}). Processing in background...`);
                 
-                // Show progress bar
-                showProgressBar(0, 0);
+                // Hide loader - we're done with the immediate request
+                document.getElementById('importLoading').classList.remove('active');
+                syncBtn.disabled = false;
                 
-                // Start polling for progress
-                await pollImportProgress(sessionId);
+                // Show a persistent success banner with import info
+                showImportStartedBanner(sessionId);
 
             } catch (error) {
                 console.error('Error starting import:', error);
@@ -2067,22 +2132,29 @@
                     updateQueueProgress(session);
                     
                     // Check if finished
+                    console.log(`Poll: status=${session.status}, is_finished=${session.is_finished}, total_jobs=${session.total_jobs}, completed=${session.completed_jobs}, imported=${session.imported_properties}`);
                     if (session.is_finished) {
                         console.log(`✅ Import finished with status: ${session.status}`);
                         
                         if (session.status === 'completed') {
-                            showAlert('success', `🎉 Import complete! ${session.imported_properties} properties imported.`);
-                            // Reload properties from database
+                            // Hide loader IMMEDIATELY when complete
+                            document.getElementById('importLoading').classList.remove('active');
+                            syncBtn.disabled = false;
+                            
+                            showAlert('success', `🎉 Import complete! ${session.imported_properties} properties imported. Loading from database...`);
+                            
+                            // Reload properties from database immediately
                             await loadFromDatabaseOnStartup();
                         } else if (session.status === 'failed') {
+                            document.getElementById('importLoading').classList.remove('active');
+                            syncBtn.disabled = false;
                             showAlert('error', `❌ Import failed: ${session.error_message || 'Unknown error'}`);
                         } else if (session.status === 'cancelled') {
+                            document.getElementById('importLoading').classList.remove('active');
+                            syncBtn.disabled = false;
                             showAlert('warning', '⚠️ Import was cancelled.');
                         }
                         
-                        hideProgressBar();
-                        document.getElementById('importLoading').classList.remove('active');
-                        syncBtn.disabled = false;
                         return;
                     }
                     
@@ -2134,6 +2206,12 @@
                 propertiesImported.textContent = '0';
                 totalPropertiesEl.textContent = 'estimating...';
                 
+                // Update simple stats even in pending state
+                const simpleLoaded = document.getElementById('simpleLoadedCount');
+                const simpleTotal = document.getElementById('simpleTotalCount');
+                if (simpleLoaded) simpleLoaded.textContent = session.imported_properties || 0;
+                if (simpleTotal) simpleTotal.textContent = session.total_properties || '...';
+                
             } else if (status === 'processing' && totalJobs > 0) {
                 // PROCESSING STATE: Jobs are running
                 progressStatusMessage.style.display = 'none';
@@ -2149,6 +2227,12 @@
                 totalChunksEl.textContent = totalJobs;
                 propertiesImported.textContent = session.imported_properties || 0;
                 totalPropertiesEl.textContent = session.total_properties || '...';
+
+                // NEW: Update simple stats
+                const simpleLoaded = document.getElementById('simpleLoadedCount');
+                const simpleTotal = document.getElementById('simpleTotalCount');
+                if (simpleLoaded) simpleLoaded.textContent = session.imported_properties || 0;
+                if (simpleTotal) simpleTotal.textContent = session.total_properties || '...';
                 
                 // Calculate ETA
                 if (session.estimated_remaining) {
@@ -2170,8 +2254,14 @@
                 progressStatusMessage.style.display = 'none';
             }
             
+            // ALWAYS update simple stats regardless of state
+            const simpleLoaded = document.getElementById('simpleLoadedCount');
+            const simpleTotal = document.getElementById('simpleTotalCount');
+            if (simpleLoaded) simpleLoaded.textContent = session.imported_properties || 0;
+            if (simpleTotal) simpleTotal.textContent = session.total_properties || '...';
+            
             // Log for debugging
-            console.log(`[Progress] Status: ${status}, Jobs: ${completedJobs}/${totalJobs}, Properties: ${session.imported_properties || 0}`);
+            console.log(`[Progress] Status: ${status}, Jobs: ${completedJobs}/${totalJobs}, Properties: ${session.imported_properties || 0}/${session.total_properties || '?'}, SimpleStats updated`);
             
             if (session.split_count) {
                 console.log(`[Progress] Split info: ${session.split_count} splits, max depth ${session.max_depth_reached || 0}`);
@@ -2359,7 +2449,9 @@
         
         // Progress Bar Helper Functions
         function showProgressBar(total, chunks) {
-            importProgress.classList.add('active');
+            // importProgress.classList.add('active'); // Hidden as requested
+            document.getElementById('importLoading').classList.add('active');
+            
             totalPropertiesEl.textContent = total;
             totalChunksEl.textContent = chunks;
             currentChunkEl.textContent = '0';
@@ -2368,11 +2460,23 @@
             progressPercentage.textContent = '0%';
             importSpeed.textContent = '';
             importETA.textContent = '';
+            
+            // Initialize simple stats
+            const simpleLoaded = document.getElementById('simpleLoadedCount');
+            const simpleTotal = document.getElementById('simpleTotalCount');
+            if (simpleLoaded) simpleLoaded.textContent = '0';
+            if (simpleTotal) simpleTotal.textContent = total;
         }
         
         function updateProgress(current, total, startTime, currentChunk, totalChunks) {
             // Update chunk counter
             currentChunkEl.textContent = currentChunk;
+            
+            // New simple stats
+            const simpleLoaded = document.getElementById('simpleLoadedCount');
+            const simpleTotal = document.getElementById('simpleTotalCount');
+            if (simpleLoaded) simpleLoaded.textContent = current;
+            if (simpleTotal) simpleTotal.textContent = total;
             
             // Update properties count
             propertiesImported.textContent = current;
@@ -2399,8 +2503,145 @@
         
         function hideProgressBar() {
             setTimeout(() => {
-                importProgress.classList.remove('active');
+                // importProgress.classList.remove('active');
+                document.getElementById('importLoading').classList.remove('active');
             }, 3000); // Keep visible for 3 seconds after completion
+        }
+        
+        // Show a simple banner when import is started (no polling required)
+        function showImportStartedBanner(sessionId) {
+            console.log(`DEBUG: Finalizing banner for session #${sessionId}`);
+            
+            // Create or update import banner
+            let banner = document.getElementById('importStatusBanner');
+            if (!banner) {
+                console.log('DEBUG: Creating new banner element');
+                banner = document.createElement('div');
+                banner.id = 'importStatusBanner';
+                banner.style.cssText = `
+                    background: linear-gradient(135deg, #10b981, #059669);
+                    color: white;
+                    padding: 1rem 1.5rem;
+                    border-radius: 12px;
+                    margin-bottom: 1.5rem;
+                    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+                    display: flex !important;
+                    align-items: center;
+                    justify-content: space-between;
+                    flex-wrap: wrap;
+                    gap: 1rem;
+                    position: relative;
+                    z-index: 9999;
+                `;
+                
+                // Insert after header – MORE ROBUST INSERTION
+                const header = document.querySelector('.header');
+                if (header) {
+                    header.after(banner);
+                    console.log('DEBUG: Banner inserted after .header');
+                } else {
+                    const container = document.querySelector('.container');
+                    if (container) {
+                        container.prepend(banner);
+                        console.log('DEBUG: Banner prepended to .container');
+                    } else {
+                        document.body.prepend(banner);
+                        console.log('DEBUG: Banner prepended to body as fallback');
+                    }
+                }
+            }
+            
+            banner.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="animation: spin 1s linear infinite;">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    </svg>
+                    <div>
+                        <strong>🚀 Import Running in Background</strong>
+                        <div id="importStatusText" style="font-size: 0.85rem; opacity: 0.9; margin-top: 0.25rem;">
+                            Session #${sessionId} • <span class="stats-loading">Fetching progress...</span>
+                        </div>
+                    </div>
+                </div>
+                <style>
+                    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+                </style>
+            `;
+            
+            banner.style.display = 'flex';
+            
+            // Also show a simple alert
+            showAlert('success', `🚀 Import started! Session #${sessionId}. Page will refresh automatically when done.`);
+            
+            // Start auto-refresh polling - checks every 10 seconds if import is complete
+            startAutoRefreshPolling(sessionId);
+        }
+        
+        // Poll for import completion and auto-refresh when done
+        function startAutoRefreshPolling(sessionId) {
+            const checkInterval = 10000; // Check every 10 seconds for better responsiveness
+            
+            const checkCompletion = async () => {
+                try {
+                    const response = await fetch('/internal-properties/import/sessions', {
+                        headers: {
+                            'Accept': 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        }
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.success && data.sessions) {
+                            // Find our specific session in the list
+                            const session = data.sessions.find(s => s.id == sessionId);
+                            
+                            if (session) {
+                                // Log progress for debugging
+                                console.log(`Progress: ${session.imported_properties || 0}/${session.total_properties || '?'} properties, Jobs: ${session.completed_jobs}/${session.total_jobs}, Status: ${session.status}`);
+                                
+                                // Update banner with current progress
+                                const statusText = document.getElementById('importStatusText');
+                                if (statusText) {
+                                    const imported = session.imported_properties !== null ? session.imported_properties : 0;
+                                    const total = session.total_properties !== null ? session.total_properties : '...';
+                                    const jobs = session.completed_jobs !== null ? session.completed_jobs : 0;
+                                    const totalJobs = session.total_jobs !== null ? session.total_jobs : 0;
+                                    
+                                    const totalStr = typeof total === 'number' ? total.toLocaleString() : total;
+                                    statusText.innerHTML = `Session #${sessionId} • <strong>${imported.toLocaleString()}</strong> / <strong>${totalStr}</strong> properties imported • <strong>Job ${jobs} / ${totalJobs}</strong>`;
+                                }
+                                
+                                // Check if finished
+                                if (session.is_finished) {
+                                    console.log('✅ Import finished! Auto-refreshing...');
+                                    if (session.status === 'completed') {
+                                        showAlert('success', `🎉 Import complete! ${session.imported_properties} properties imported. Refreshing...`);
+                                    } else if (session.status === 'failed') {
+                                        showAlert('error', `❌ Import failed: ${session.error_message || 'Unknown error'}`);
+                                    }
+                                    setTimeout(() => location.reload(), 2000);
+                                    return; // Stop polling
+                                }
+                            } else {
+                                console.log(`Session #${sessionId} not found in recent sessions.`);
+                            }
+                        }
+                    } else {
+                        console.log(`Progress update failed: Server returned ${response.status}`);
+                    }
+                    
+                    // Continue polling
+                    setTimeout(checkCompletion, checkInterval);
+                    
+                } catch (error) {
+                    console.log('Progress check failed, retrying...', error);
+                    setTimeout(checkCompletion, checkInterval);
+                }
+            };
+            
+            // Start first check IMMEDIATELY, then every 10 seconds
+            checkCompletion();
         }
         
         function formatETA(seconds) {

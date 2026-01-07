@@ -156,15 +156,15 @@ class RightmoveScraperService
                 }
             }
 
-            // Fallback: look for result count in HTML
-            if (preg_match('/(\d{1,3}(?:,\d{3})*)\s*(?:properties|results)/i', $html, $matches)) {
-                return (int) str_replace(',', '', $matches[1]);
-            }
+        // Fallback: look for result count in HTML
+        if (preg_match('/(\d{1,3}(?:,\d{3})*)\s*(?:properties|results)/i', $html, $matches)) {
+            return (int) str_replace(',', '', $matches[1]);
+        }
 
-            // Another pattern for search results
-            if (preg_match('/"resultCount"\s*:\s*"?(\d+)"?/', $html, $matches)) {
-                return (int) $matches[1];
-            }
+        // Another pattern for search results
+        if (preg_match('/"resultCount"\s*:\s*"?(\d+)"?/', $html, $matches)) {
+            return (int) $matches[1];
+        }
 
             Log::warning("Could not extract result count from: {$searchUrl}");
             return 0;
