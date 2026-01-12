@@ -38,19 +38,21 @@ class MasterImportJob implements ShouldQueue
     public bool $deleteWhenMissingModels = true;
 
     // Store session ID instead of model for reliability on server
-    protected int $importSessionId;
-    protected string $baseUrl;
-    protected ?int $savedSearchId;
+    protected int $importSessionId = 0;
+    protected string $baseUrl = '';
+    protected ?int $savedSearchId = null;
+    protected string $mode = 'full'; // 'full', 'urls_only', 'fetch_details'
 
     /**
      * Create a new job instance.
      */
-    public function __construct(ImportSession $importSession, string $baseUrl, ?int $savedSearchId = null)
+    public function __construct(ImportSession $importSession, string $baseUrl, ?int $savedSearchId = null, string $mode = 'full')
     {
         // Store ID instead of model for better reliability on cron-based systems
         $this->importSessionId = $importSession->id;
         $this->baseUrl = $baseUrl;
         $this->savedSearchId = $savedSearchId;
+        $this->mode = $mode;
         
         // Run on a specific queue for imports
         $this->onQueue('imports');
@@ -127,7 +129,12 @@ class MasterImportJob implements ShouldQueue
             
             // Get ACTUAL total count from source website instead of estimation
             // This ensures the progress bar shows the correct number
-            $actualTotalCount = $scraperService->probeResultCount($this->baseUrl);
+            // Use cache to avoid redundant probes during job retries
+            $cacheKey = 'import_total_' . md5($this->baseUrl);
+            $actualTotalCount = cache()->remember($cacheKey, 3600, function() use ($scraperService) {
+                return $scraperService->probeResultCount($this->baseUrl);
+            });
+            
             $importSession->setTotalProperties($actualTotalCount);
             Log::info("=== MASTER: Actual total properties from source: {$actualTotalCount} ===");
             
@@ -146,7 +153,8 @@ class MasterImportJob implements ShouldQueue
                     $chunk['min_price'],
                     $chunk['max_price'],
                     $chunk['estimated_count'],
-                    $this->savedSearchId
+                    $this->savedSearchId,
+                    $this->mode
                 )->onQueue('imports')->delay(now()->addSeconds($delay));
                 
                 Log::info("Dispatched chunk job {$index} for range: £" . 

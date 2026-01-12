@@ -32,12 +32,12 @@ class ImportChunkJob implements ShouldQueue
     /**
      * The number of seconds to wait before retrying.
      */
-    public int $backoff = 60;
+    public int $backoff = 30;
 
     /**
      * The number of seconds the job can run before timing out.
      */
-    public int $timeout = 1800; // 30 minutes per chunk
+    public int $timeout = 300; // 5 minutes per chunk - reduced for shared hosting
 
     /**
      * Delete the job if its models no longer exist.
@@ -45,12 +45,13 @@ class ImportChunkJob implements ShouldQueue
     public bool $deleteWhenMissingModels = true;
 
     // Store session ID instead of model for reliability on server
-    protected int $importSessionId;
-    protected string $chunkUrl;
-    protected int $minPrice;
-    protected int $maxPrice;
-    protected int $estimatedCount;
-    protected ?int $savedSearchId;
+    protected int $importSessionId = 0;
+    protected string $chunkUrl = '';
+    protected int $minPrice = 0;
+    protected int $maxPrice = 0;
+    protected int $estimatedCount = 0;
+    protected ?int $savedSearchId = null;
+    protected string $mode = 'full'; // 'full' or 'urls_only'
 
     /**
      * Create a new job instance.
@@ -61,7 +62,8 @@ class ImportChunkJob implements ShouldQueue
         int $minPrice,
         int $maxPrice,
         int $estimatedCount,
-        ?int $savedSearchId = null
+        ?int $savedSearchId = null,
+        string $mode = 'full'
     ) {
         // Store ID instead of model for better reliability on cron-based systems
         $this->importSessionId = $importSession->id;
@@ -70,6 +72,7 @@ class ImportChunkJob implements ShouldQueue
         $this->maxPrice = $maxPrice;
         $this->estimatedCount = $estimatedCount;
         $this->savedSearchId = $savedSearchId;
+        $this->mode = $mode;
         
         $this->onQueue('imports');
     }
@@ -161,8 +164,8 @@ class ImportChunkJob implements ShouldQueue
             
             Log::info("Saved " . count($urlsToFetch) . " new URLs, skipped {$skippedCount} existing");
             
-            // Step 3: Fetch full property details for new URLs
-            if (!empty($urlsToFetch)) {
+            // Step 3: Fetch full property details for new URLs (if not urls_only)
+            if ($this->mode === 'full' && !empty($urlsToFetch)) {
                 $results = $propertyService->fetchPropertiesConcurrently($urlsToFetch);
                 
                 // Step 4: Save property details to database
@@ -179,6 +182,16 @@ class ImportChunkJob implements ShouldQueue
                 
                 Log::info("Successfully imported {$importedCount} properties");
                 $savedCount = $importedCount;
+
+                // Step 5: Automatically trigger sold data import for these properties
+                foreach ($results['properties'] ?? [] as $property) {
+                    if (!empty($property['sold_link'])) {
+                        Log::info("Dispatching ImportSoldJob for property {$property['id']}");
+                        ImportSoldJob::dispatch($property['id'])
+                            ->onQueue('imports')
+                            ->delay(now()->addSeconds(rand(5, 30)));
+                    }
+                }
             }
             
             // Rate limiting delay between chunks

@@ -3,6 +3,7 @@
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\InternalPropertyController;
 use App\Http\Controllers\SavedSearchController;
+use App\Http\Controllers\ScheduleController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('auth')->group(function () {
@@ -45,6 +46,18 @@ Route::middleware('auth')->group(function () {
         Route::match(['post', 'put'], '/update/{id}', [SavedSearchController::class, 'update'])->name('update');
         Route::get('/areas', [SavedSearchController::class, 'getAreas'])->name('getAreas');
         Route::post('/check-area', [SavedSearchController::class, 'checkArea'])->name('check-area');
+    });
+
+    // Schedule Routes (for scheduled property imports)
+    Route::prefix('schedules')->name('schedules.')->group(function () {
+        Route::get('/', [ScheduleController::class, 'index'])->name('index');
+        Route::post('/', [ScheduleController::class, 'store'])->name('store');
+        Route::post('/url', [ScheduleController::class, 'storeUrl'])->name('store-url');
+        Route::delete('/{id}', [ScheduleController::class, 'destroy'])->name('destroy');
+        Route::post('/{id}/retry', [ScheduleController::class, 'retry'])->name('retry');
+        Route::post('/{id}/start-queued', [ScheduleController::class, 'startQueuedImport'])->name('start-queued');
+        Route::get('/status', [ScheduleController::class, 'getStatus'])->name('status');
+        Route::post('/process', [ScheduleController::class, 'processChunk'])->name('process');
     });
 });
 

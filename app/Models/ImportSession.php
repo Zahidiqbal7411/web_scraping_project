@@ -11,6 +11,7 @@ class ImportSession extends Model
         'saved_search_id',
         'base_url',
         'status',
+        'mode',
         'total_jobs',
         'completed_jobs',
         'failed_jobs',
@@ -72,6 +73,26 @@ class ImportSession extends Model
         // Check if all jobs are done
         $this->refresh();
         if ($this->completed_jobs + $this->failed_jobs >= $this->total_jobs && $this->total_jobs > 0) {
+            
+            // If this was a urls_only import for a schedule, trigger property details phase
+            if ($this->mode === 'urls_only') {
+                $schedule = \App\Models\Schedule::where('import_session_id', $this->id)->first();
+                if ($schedule) {
+                    Log::info("Session {$this->id} (URLs Only) completed. Starting property details phase for schedule #{$schedule->id}");
+                    
+                    $schedule->markUrlImportComplete();
+                    $schedule->update(['status' => \App\Models\Schedule::STATUS_IMPORTING]);
+                    
+                    // Reset session for next phase or create a new one?
+                    // Reusing the session is fine, just update mode and reset counts if needed,
+                    // but better to just keep it and dispatch the next job.
+                    $this->update(['mode' => 'fetch_details', 'completed_jobs' => 0, 'total_jobs' => 1]);
+                    
+                    \App\Jobs\FetchDetailsFromUrlsJob::dispatch($this, $schedule->saved_search_id);
+                    return $this;
+                }
+            }
+
             $this->markCompleted();
         }
         
@@ -179,10 +200,20 @@ class ImportSession extends Model
      */
     public function getProgressPercentage(): float
     {
+        // For fetch_details mode, use property counts if available
+        if ($this->mode === 'fetch_details' && $this->total_properties > 0) {
+            return round(($this->imported_properties / $this->total_properties) * 100, 1);
+        }
+
         if ($this->total_jobs === 0) {
             return 0;
         }
-        return round(($this->completed_jobs + $this->failed_jobs) / $this->total_jobs * 100, 1);
+
+        // Standard job-based progress
+        $progress = round(($this->completed_jobs + $this->failed_jobs) / $this->total_jobs * 100, 1);
+        
+        // Cap at 100
+        return min(100, $progress);
     }
 
     /**

@@ -2612,11 +2612,18 @@
                                     statusText.innerHTML = `Session #${sessionId} • <strong>${imported.toLocaleString()}</strong> / <strong>${totalStr}</strong> properties imported • <strong>Job ${jobs} / ${totalJobs}</strong>`;
                                 }
                                 
-                                // Check if finished
-                                if (session.is_finished) {
+                                // Check if finished - with fallback detection
+                                const allJobsDone = session.total_jobs > 0 && session.completed_jobs >= session.total_jobs;
+                                const isComplete = session.is_finished || session.status === 'completed' || allJobsDone;
+                                
+                                if (isComplete) {
                                     console.log('✅ Import finished! Auto-refreshing...');
-                                    if (session.status === 'completed') {
-                                        showAlert('success', `🎉 Import complete! ${session.imported_properties} properties imported. Refreshing...`);
+                                    // Remove the banner immediately
+                                    const banner = document.getElementById('importStatusBanner');
+                                    if (banner) banner.remove();
+                                    
+                                    if (session.status === 'completed' || allJobsDone) {
+                                        showAlert('success', `🎉 Import complete! ${session.imported_properties || 0} properties imported. Loading from database...`);
                                     } else if (session.status === 'failed') {
                                         showAlert('error', `❌ Import failed: ${session.error_message || 'Unknown error'}`);
                                     }

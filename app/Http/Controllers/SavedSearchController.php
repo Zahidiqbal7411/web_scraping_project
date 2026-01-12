@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\SavedSearch;
+use App\Models\Schedule;
 use App\Models\Url;
 use Illuminate\Http\Request;
 use GuzzleHttp\Client;
@@ -30,9 +31,23 @@ class SavedSearchController extends Controller
         $perPage = min(max((int) $request->input('per_page', 10), 10), 100);
         $searches = $query->latest()->paginate($perPage);
         
+        // Include schedule data
+        $items = collect($searches->items())->map(function($search) {
+            $schedule = Schedule::where('saved_search_id', $search->id)->first();
+            $search->schedule = $schedule ? [
+                'id' => $schedule->id,
+                'status' => $schedule->status,
+                'status_label' => $schedule->getStatusLabel(),
+                'status_color' => $schedule->getStatusColor(),
+                'progress' => $schedule->importSession ? $schedule->importSession->getProgressPercentage() : $schedule->getProgressPercentage(),
+                'is_importing' => $schedule->status === Schedule::STATUS_IMPORTING,
+            ] : null;
+            return $search;
+        });
+        
         return response()->json([
             'success' => true,
-            'searches' => $searches->items(),
+            'searches' => $items,
             'pagination' => [
                 'current_page' => $searches->currentPage(),
                 'last_page' => $searches->lastPage(),
@@ -55,9 +70,17 @@ class SavedSearchController extends Controller
 
         $search = SavedSearch::create($data);
 
+        // Automatically add to schedule for import
+        Schedule::create([
+            'saved_search_id' => $search->id,
+            'name' => $search->area ?? 'Search #' . $search->id,
+            'url' => $search->updates_url,
+            'status' => Schedule::STATUS_PENDING,
+        ]);
+
         return response()->json([
             'success' => true,
-            'message' => 'Search saved successfully',
+            'message' => 'Search saved and scheduled for import',
             'search' => $search
         ]);
     }

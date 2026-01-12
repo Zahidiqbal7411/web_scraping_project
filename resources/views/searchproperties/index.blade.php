@@ -206,7 +206,7 @@
 
         table {
             width: 100%;
-            min-width: 800px;
+            min-width: 1000px;
             border-collapse: collapse;
         }
 
@@ -789,7 +789,7 @@
                             <th>Area</th>
                             <th>Price Range</th>
                             <th>Bedrooms</th>
-                            <th>Property Type</th>
+                            <th>Status</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -1462,25 +1462,51 @@
                         const maxPrice = search.max_price ? `£${parseInt(search.max_price).toLocaleString()}` : 'Max';
                         const minBed = search.min_bed || '0';
                         const maxBed = search.max_bed || 'Max';
-                        const type = search.property_type ? search.property_type.replace(/,/g, ', ') : 'Any';
-                        const typeShort = type.length > 20 ? type.substring(0, 20) + '...' : type;
                         const area = search.area ? search.area.replace(/\+/g, ' ') : 'Unknown';
+
+                        const schedule = search.schedule;
+                        let statusHtml = '<span class="badge" style="background: var(--text-secondary); color: white;">No Schedule</span>';
+                        
+                        if (schedule) {
+                            let badgeStyle = `background: ${schedule.status_color}; color: white; display: inline-block; width: fit-content; padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;`;
+                            
+                            if (schedule.status_label === 'Completed') {
+                                badgeStyle = 'background: hsla(142, 70%, 45%, 0.15); color: hsl(142, 70%, 35%); border: 1px solid hsla(142, 70%, 45%, 0.3); display: inline-block; width: fit-content; padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700;';
+                            } else if (schedule.status_label === 'Importing') {
+                                badgeStyle = 'background: hsla(170, 85%, 35%, 0.15); color: var(--teal); border: 1px solid hsla(170, 85%, 35%, 0.3); display: inline-block; width: fit-content; padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700;';
+                            }
+                            
+                            statusHtml = `
+                                <div style="display: flex; flex-direction: column; gap: 0.35rem;">
+                                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                        <span class="badge" style="${badgeStyle}">
+                                            ${schedule.status_label}
+                                        </span>
+                                        ${schedule.is_importing ? `<small style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 700;">${schedule.progress}%</small>` : ''}
+                                    </div>
+                                    ${schedule.is_importing ? `
+                                        <div class="progress-container" style="height: 4px; background: var(--bg-secondary); border-radius: 2px; width: 60px; overflow: hidden;">
+                                            <div class="progress-bar" style="height: 100%; background: var(--teal); width: ${schedule.progress}%; transition: width 0.3s ease;"></div>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `;
+                        }
 
                         return `
                             <tr>
                                 <td>${area}</td>
                                 <td class="text-muted">${minPrice} - ${maxPrice}</td>
                                 <td class="text-muted">${minBed} - ${maxBed} Beds</td>
-                                <td class="text-muted capitalize">
-                                    <a href="{{ url('internal-properties/search', [], false) }}/${search.id}" class="btn btn-sm" style="background: var(--primary); color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
-                                        <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-                                        Property Details
-                                    </a>
-                                </td>
+                                <td>${statusHtml}</td>
                                 <td>
                                     <div class="actions">
+                                        <a href="{{ url('internal-properties/search', [], false) }}/${search.id}" class="btn btn-sm" style="background: var(--primary); color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
+                                            <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                            Property Details
+                                        </a>
+                                        <a href="{{ url('internal-properties/search', [], false) }}/${search.id}" class="btn btn-secondary btn-sm" title="View Properties">View</a>
                                         <button onclick="editSearch(${search.id})" class="btn btn-primary btn-sm">Edit</button>
-                                        <button onclick="viewSearch(${search.id})" class="btn btn-secondary btn-sm">View</button>
                                         <button onclick="confirmDelete(${search.id}, '${area.replace(/'/g, "\\'")}')" class="btn btn-danger btn-sm">Delete</button>
                                     </div>
                                 </td>
@@ -1574,9 +1600,63 @@
             console.error('nextPageBtn element not found');
         }
 
-        // Property Type Modal Elements
         const propertyTypeModal = document.getElementById('propertyTypeModal');
         const propertyTypeModalBody = document.getElementById('propertyTypeModalBody');
+
+        // Start Queued Import
+        async function startImport(scheduleId) {
+            try {
+                const response = await fetch(`{{ url('schedules', [], false) }}/${scheduleId}/start-queued`, {
+                    method: 'POST',
+                    headers: {
+                        'Accept': 'application/json',
+                        'X-CSRF-TOKEN': getCsrfToken()
+                    }
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    showAlert('success', 'Import started in background');
+                    loadSearches(currentPage);
+                    startPolling();
+                } else {
+                    showAlert('error', data.message || 'Failed to start import');
+                }
+            } catch (error) {
+                showAlert('error', 'Error starting import: ' + error.message);
+            }
+        }
+
+        // Auto-refresh when importing
+        let pollingInterval = null;
+        function startPolling() {
+            if (pollingInterval) return;
+            pollingInterval = setInterval(() => {
+                const importingRows = document.querySelectorAll('.progress-bar');
+                if (importingRows.length > 0) {
+                    loadSearches(currentPage);
+                } else {
+                    stopPolling();
+                }
+            }, 5000);
+        }
+
+        function stopPolling() {
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
+            }
+        }
+
+        // Expose functions globally
+        window.startImport = startImport;
+        window.editSearch = editSearch;
+        window.viewSearch = viewSearch;
+        window.confirmDelete = confirmDelete;
+        window.viewPropertyTypes = viewPropertyTypes;
+        
+        // Start polling if needed on load
+        startPolling();
         const closePropertyTypeModalBtn = document.getElementById('closePropertyTypeModal');
 
         // Property Type Modal Close

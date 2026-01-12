@@ -232,7 +232,7 @@ class RightmoveScraperService
                     
                     // If properties still empty, try to find any 'properties' key deep
                     if (empty($properties)) {
-                        $it = new RecursiveIteratorIterator(new RecursiveArrayIterator($json));
+                        $it = new \RecursiveIteratorIterator(new \RecursiveArrayIterator($json));
                         foreach ($it as $key => $value) {
                             if ($key === 'properties' && is_array($value)) {
                                 $properties = $value;
@@ -317,7 +317,7 @@ class RightmoveScraperService
     /**
      * Fetch URL with retry logic
      */
-    private function fetchWithRetry(string $url, int $maxRetries = 3): string
+    public function fetchWithRetry(string $url, int $maxRetries = 3): string
     {
         $attempt = 0;
         while ($attempt < $maxRetries) {
@@ -348,7 +348,7 @@ class RightmoveScraperService
     /**
      * Parse JSON from HTML
      */
-    private function parseJsonData(string $html): ?array
+    public function parseJsonData(string $html): ?array
     {
         if (preg_match('/window\.PAGE_MODEL\s*=\s*(\{.*?\});/s', $html, $matches)) {
             return json_decode($matches[1], true);
