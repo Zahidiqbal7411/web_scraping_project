@@ -1474,6 +1474,10 @@
                                 badgeStyle = 'background: hsla(142, 70%, 45%, 0.15); color: hsl(142, 70%, 35%); border: 1px solid hsla(142, 70%, 45%, 0.3); display: inline-block; width: fit-content; padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700;';
                             } else if (schedule.status_label === 'Importing') {
                                 badgeStyle = 'background: hsla(170, 85%, 35%, 0.15); color: var(--teal); border: 1px solid hsla(170, 85%, 35%, 0.3); display: inline-block; width: fit-content; padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700;';
+                            } else if (schedule.status_label === 'Pending') {
+                                badgeStyle = 'background: hsla(35, 90%, 50%, 0.12); color: hsl(30, 85%, 40%); border: 1px solid hsla(35, 90%, 50%, 0.3); display: inline-block; width: fit-content; padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700;';
+                            } else if (schedule.status_label === 'Failed') {
+                                badgeStyle = 'background: hsla(0, 70%, 50%, 0.12); color: hsl(0, 70%, 45%); border: 1px solid hsla(0, 70%, 50%, 0.3); display: inline-block; width: fit-content; padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700;';
                             }
                             
                             statusHtml = `
@@ -1505,7 +1509,7 @@
                                             <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
                                             Property Details
                                         </a>
-                                        <a href="{{ url('internal-properties/search', [], false) }}/${search.id}" class="btn btn-secondary btn-sm" title="View Properties">View</a>
+                                        <button onclick="viewSearch(${search.id})" class="btn btn-secondary btn-sm" title="View Search Details">View</button>
                                         <button onclick="editSearch(${search.id})" class="btn btn-primary btn-sm">Edit</button>
                                         <button onclick="confirmDelete(${search.id}, '${area.replace(/'/g, "\\'")}')" class="btn btn-danger btn-sm">Delete</button>
                                     </div>
@@ -1648,12 +1652,9 @@
             }
         }
 
-        // Expose functions globally
+        // Note: editSearch, viewSearch, confirmDelete are defined directly on window later in the script
+        // using `window.functionName = (id) => {...}` syntax
         window.startImport = startImport;
-        window.editSearch = editSearch;
-        window.viewSearch = viewSearch;
-        window.confirmDelete = confirmDelete;
-        window.viewPropertyTypes = viewPropertyTypes;
         
         // Start polling if needed on load
         startPolling();

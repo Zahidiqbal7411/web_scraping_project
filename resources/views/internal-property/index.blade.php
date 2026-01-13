@@ -1637,8 +1637,9 @@
                     All Imported Properties
                 @endif
             </h1>
+            {{-- Hidden as per user request --}}
             @if(isset($search))
-            <div style="display: flex; gap: 1rem;">
+            <div style="display: none; gap: 1rem;">
                 <button class="sync-btn" id="headerImportSoldBtn" style="display: none; background: var(--secondary);">
                     <svg class="sync-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
@@ -2509,8 +2510,10 @@
         }
         
         // Show a simple banner when import is started (no polling required)
+        // DISABLED: Banner hidden per user request
         function showImportStartedBanner(sessionId) {
-            console.log(`DEBUG: Finalizing banner for session #${sessionId}`);
+            console.log(`DEBUG: Banner display disabled per user request (session #${sessionId})`);
+            return; // Exit early - don't show banner
             
             // Create or update import banner
             let banner = document.getElementById('importStatusBanner');
@@ -2874,33 +2877,62 @@
                 
                 if (data.success) {
                     const jobCount = data.jobs_dispatched || 0;
-                    const estTime = data.estimated_time_seconds || (jobCount * 5);
-                    const estMins = Math.ceil(estTime / 60);
                     
-                    // Calculate refresh time (minimum 30 seconds, based on job count)
-                    const refreshSeconds = Math.min(Math.max(30, jobCount * 2), 300); // 30s to 5 mins max
+                    showAlert('success', `✅ Dispatched ${jobCount} sold import jobs! Monitoring progress...`);
                     
-                    showAlert('success', `✅ Dispatched ${jobCount} sold import jobs! Page will auto-refresh in ${refreshSeconds}s to show results.`);
+                    // Start polling for completion
+                    btn.innerHTML = `
+                        <span class="spinner-sm" style="display:inline-block; width:12px; height:12px; border:2px solid currentColor; border-top-color:transparent; border-radius:50%; animation:spin 1s linear infinite;"></span>
+                        Processing ${jobCount} jobs...
+                    `;
                     
-                    // Start countdown and auto-refresh
-                    let countdown = refreshSeconds;
-                    const countdownInterval = setInterval(() => {
-                        countdown--;
-                        if (countdown > 0) {
-                            btn.innerHTML = `
-                                <span style="color: #10b981;">⏳</span>
-                                Refreshing in ${countdown}s...
-                            `;
-                        } else {
-                            clearInterval(countdownInterval);
-                            btn.innerHTML = `
-                                <span class="spinner-sm" style="display:inline-block; width:12px; height:12px; border:2px solid currentColor; border-top-color:transparent; border-radius:50%; animation:spin 1s linear infinite;"></span>
-                                Reloading...
-                            `;
-                            // Refresh the page to show updated sold data
-                            window.location.reload();
+                    // Poll for completion every 5 seconds
+                    const pollForCompletion = async () => {
+                        try {
+                            // Check how many properties now have sold data
+                            const checkResponse = await fetch(
+                                window.searchContext 
+                                    ? `/internal-properties/load?search_id=${window.searchContext.id}&page=1&per_page=1`
+                                    : `/internal-properties/load?page=1&per_page=1`,
+                                {
+                                    method: 'GET',
+                                    headers: {
+                                        'Accept': 'application/json',
+                                        'X-Requested-With': 'XMLHttpRequest'
+                                    }
+                                }
+                            );
+                            
+                            // Simple check: reload after a reasonable time based on job count
+                            // Each job takes ~2-5 seconds on average
+                            const estimatedTime = Math.min(jobCount * 3, 180); // Max 3 minutes
+                            const elapsedTime = (Date.now() - pollStartTime) / 1000;
+                            const remainingTime = Math.max(0, estimatedTime - elapsedTime);
+                            
+                            if (remainingTime > 0) {
+                                btn.innerHTML = `
+                                    <span style="color: #10b981;">⏳</span>
+                                    ~${Math.ceil(remainingTime)}s remaining...
+                                `;
+                                setTimeout(pollForCompletion, 5000);
+                            } else {
+                                // Time's up - refresh the page
+                                btn.innerHTML = `
+                                    <span class="spinner-sm" style="display:inline-block; width:12px; height:12px; border:2px solid currentColor; border-top-color:transparent; border-radius:50%; animation:spin 1s linear infinite;"></span>
+                                    Reloading...
+                                `;
+                                showAlert('success', '🎉 Sold import complete! Reloading page with all data...');
+                                setTimeout(() => window.location.reload(), 1500);
+                            }
+                        } catch (error) {
+                            console.error('Poll error:', error);
+                            // On error, continue polling
+                            setTimeout(pollForCompletion, 5000);
                         }
-                    }, 1000);
+                    };
+                    
+                    const pollStartTime = Date.now();
+                    setTimeout(pollForCompletion, 5000);
                     
                 } else {
                     throw new Error(data.message || 'Failed to start sold import');

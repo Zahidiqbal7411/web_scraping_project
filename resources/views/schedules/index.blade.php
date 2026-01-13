@@ -204,22 +204,31 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     let isDone = false;
     let errorCount = 0;
+    let consecutiveSuccesses = 0;
 
     while (!isDone) {
         try {
+            // Use AbortController for request timeout (30 seconds should be plenty now)
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000);
+
             const response = await fetch('/schedules/process', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json',
                     'X-CSRF-TOKEN': '{{ csrf_token() }}'
-                }
+                },
+                signal: controller.signal
             });
+
+            clearTimeout(timeoutId);
 
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             
             const data = await response.json();
             errorCount = 0; // Reset error count on success
+            consecutiveSuccesses++;
 
             if (!data.success) {
                 statusTitle.textContent = '❌ Import Halted';
@@ -261,31 +270,37 @@ document.addEventListener('DOMContentLoaded', async function() {
 
         } catch (error) {
             errorCount++;
+            consecutiveSuccesses = 0;
             console.error(error);
             
-            // More descriptive error based on state
+            // More descriptive error based on state and error type
             let errorMsg = 'Connection interrupted. Retrying... (' + errorCount + ')';
-            if (statusMessage.textContent.includes('Initializing')) {
-                errorMsg = 'Server busy with heavy initialization. Retrying... (' + errorCount + ')';
+            if (error.name === 'AbortError') {
+                errorMsg = 'Request timed out. Starting worker... (' + errorCount + ')';
+            } else if (statusMessage.textContent.includes('Initializing')) {
+                errorMsg = 'Worker initializing import patterns... (' + errorCount + ')';
+            } else if (statusMessage.textContent.includes('Started queued')) {
+                errorMsg = 'Worker starting up. Please wait... (' + errorCount + ')';
             }
             
             log(errorMsg, 'warning');
             
-            if (errorCount > 20) { // Increased from 10 to 20 for better resilience
+            if (errorCount > 30) { // Allow more retries since requests are faster now
                 statusTitle.textContent = '❌ Connection Lost';
                 statusMessage.textContent = 'Unable to reach the server. Please check your connection.';
                 log('MAX RETRIES EXCEEDED: Connection aborted. Please refresh the page.', 'error');
                 break;
             }
             
-            // Wait longer between retries if errors persist
-            const retryDelay = Math.min(1000 * errorCount, 10000); 
+            // Wait between retries - start short, increase gradually
+            const retryDelay = Math.min(2000 + (500 * errorCount), 10000); 
             await new Promise(resolve => setTimeout(resolve, retryDelay));
             continue; // Force next iteration of loop to retry
         }
 
-        // Small delay between successful chunks
-        await new Promise(resolve => setTimeout(resolve, 800));
+        // Polling interval - faster when things are progressing
+        const pollDelay = consecutiveSuccesses > 3 ? 1500 : 2000;
+        await new Promise(resolve => setTimeout(resolve, pollDelay));
     }
 });
 </script>

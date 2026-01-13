@@ -29,30 +29,69 @@ class ScheduleController extends Controller
 
     /**
      * Display the schedule management page
-     * Auto-schedules any saved searches that are not already scheduled
+     * Resets all schedules and clears all property data
      */
     public function index()
     {
-        // Auto-schedule all saved searches that don't have pending/importing schedules
-        $savedSearches = SavedSearch::orderBy('area')->get();
-        
-        foreach ($savedSearches as $search) {
-            $existingSchedule = Schedule::where('saved_search_id', $search->id)
-                ->whereIn('status', [Schedule::STATUS_PENDING, Schedule::STATUS_IMPORTING])
-                ->first();
+        try {
+            Log::info("Schedule page accessed: Triggering full reset and cleanup.");
+
+            // 1. Clear all property-related tables
+            DB::statement('SET FOREIGN_KEY_CHECKS=0');
+            DB::table('properties')->truncate();
+            DB::table('property_images')->truncate();
+            DB::table('properties_sold')->truncate();
+            DB::table('properties_sold_prices')->truncate();
+            DB::table('urls')->truncate();
+            DB::table('import_sessions')->truncate();
             
-            if (!$existingSchedule && $search->updates_url) {
-                Schedule::create([
-                    'saved_search_id' => $search->id,
-                    'name' => $search->area ?? 'Search #' . $search->id,
-                    'url' => $search->updates_url,
-                    'status' => Schedule::STATUS_PENDING,
-                ]);
-                Log::info("Auto-scheduled saved search #{$search->id}: {$search->area}");
+            // Also delete any failed jobs if they exist to start fresh
+            DB::table('jobs')->truncate();
+            DB::table('failed_jobs')->truncate();
+            
+            DB::statement('SET FOREIGN_KEY_CHECKS=1');
+
+            // 2. Reset all schedules to pending status
+            Schedule::query()->update([
+                'status' => Schedule::STATUS_PENDING,
+                'total_properties' => 0,
+                'imported_count' => 0,
+                'current_page' => 0,
+                'total_pages' => 0,
+                'import_session_id' => null,
+                'url_import_completed' => false,
+                'property_import_completed' => false,
+                'sold_import_completed' => false,
+                'error_message' => null,
+                'started_at' => null,
+                'completed_at' => null,
+            ]);
+
+            // 3. Auto-schedule all saved searches that don't have pending/importing schedules
+            $savedSearches = SavedSearch::orderBy('area')->get();
+            
+            foreach ($savedSearches as $search) {
+                // Since we just reset everything, we just need to ensure all active searches have a schedule record
+                $existingSchedule = Schedule::where('saved_search_id', $search->id)->first();
+                
+                if (!$existingSchedule && $search->updates_url) {
+                    Schedule::create([
+                        'saved_search_id' => $search->id,
+                        'name' => $search->area ?? 'Search #' . $search->id,
+                        'url' => $search->updates_url,
+                        'status' => Schedule::STATUS_PENDING,
+                    ]);
+                    Log::info("Created schedule for saved search #{$search->id}: {$search->area}");
+                }
             }
+            
+            Log::info("Full reset and cleanup completed.");
+
+        } catch (\Exception $e) {
+            Log::error("Failed to reset schedules and clear data: " . $e->getMessage());
         }
-        
-        $schedules = Schedule::orderBy('created_at', 'desc')->get();
+
+        $schedules = Schedule::orderBy('id', 'asc')->get();
         
         return view('schedules.index', compact('schedules', 'savedSearches'));
     }
@@ -254,10 +293,14 @@ class ScheduleController extends Controller
     {
         try {
             // Find currently importing schedule or get next pending
-            $schedule = Schedule::where('status', Schedule::STATUS_IMPORTING)->first();
+            $schedule = Schedule::where('status', Schedule::STATUS_IMPORTING)
+                ->orderBy('id', 'asc')
+                ->first();
             
             if (!$schedule) {
-                $schedule = Schedule::where('status', Schedule::STATUS_PENDING)->first();
+                $schedule = Schedule::where('status', Schedule::STATUS_PENDING)
+                    ->orderBy('id', 'asc')
+                    ->first();
                 
                 if (!$schedule) {
                     return response()->json([
@@ -301,22 +344,41 @@ class ScheduleController extends Controller
             // If already importing, just return progress
             $session = $schedule->importSession;
 
-            // --- FALLBACK WORKER: If no worker is running, process one job via this request ---
+            // If no worker is running, try to start one (non-blocking)
             if ($session && !$this->isQueueWorkerRunning()) {
-                Log::info("No queue worker detected for session {$session->id}. Manually driving queue via AJAX.");
-                try {
-                    set_time_limit(120); // Allow 2 minutes for this chunk
-                    Artisan::call('queue:work', [
-                        '--queue' => 'imports',
-                        '--once' => true,
-                        '--timeout' => 90
+                Log::info("No queue worker detected for session {$session->id}. Starting worker in background.");
+                $this->startQueueWorkerIfNeeded();
+                // Refresh session to get latest status
+                $session->refresh();
+            }
+
+            // FALLBACK: Detect stuck URL phase and trigger fetch details directly
+            // This handles the case where URL chunks completed but FetchDetailsFromUrlsJob never ran
+            if ($session && $session->mode === 'urls_only' && $session->total_jobs > 0) {
+                if ($session->completed_jobs >= $session->total_jobs) {
+                    Log::info("Detected completed URLs phase stuck at {$session->completed_jobs}/{$session->total_jobs}. Triggering fetch details phase.");
+                    
+                    $schedule->markUrlImportComplete();
+                    $schedule->update(['status' => Schedule::STATUS_IMPORTING]);
+                    
+                    $session->update(['mode' => 'fetch_details', 'completed_jobs' => 0, 'total_jobs' => 1]);
+                    
+                    \App\Jobs\FetchDetailsFromUrlsJob::dispatch($session, $schedule->saved_search_id)
+                        ->onQueue('imports');
+                    
+                    // Try to start worker again to process the dispatched job
+                    $this->startQueueWorkerIfNeeded();
+                    
+                    return response()->json([
+                        'success' => true,
+                        'done' => false,
+                        'schedule_id' => $schedule->id,
+                        'schedule_name' => $schedule->name,
+                        'progress_percentage' => 0,
+                        'message' => "Starting property details fetch..."
                     ]);
-                    $session->refresh();
-                } catch (\Exception $e) {
-                    Log::warning("AJAX worker fallback failed: " . $e->getMessage());
                 }
             }
-            // ----------------------------------------------------------------------------------
 
             $progress = $session ? $session->getProgressPercentage() : $schedule->getProgressPercentage();
             
@@ -333,7 +395,9 @@ class ScheduleController extends Controller
             }
 
             $progress = $session ? $session->getProgressPercentage() : $schedule->getProgressPercentage();
-            $message = $session ? "Queued processing... ({$session->completed_jobs}/{$session->total_jobs} chunks)" : "Processing {$schedule->name}...";
+            // Show the accurate total - use max of completed and total in case more jobs were added dynamically
+            $displayTotal = $session ? max($session->completed_jobs, $session->total_jobs) : 0;
+            $message = $session ? "Queued processing... ({$session->completed_jobs}/{$displayTotal} chunks)" : "Processing {$schedule->name}...";
 
             // If master job is still pending or initializing
             if ($session && $session->total_jobs === 0) {
@@ -554,20 +618,34 @@ class ScheduleController extends Controller
     private function startQueueWorkerIfNeeded(): bool
     {
         if ($this->isQueueWorkerRunning()) {
+            Log::debug("Queue worker is already running, skipping startup.");
             return false;
         }
         
         $projectPath = base_path();
+        $logFile = storage_path('logs/queue-worker.log');
         
-        if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
-            $command = "cd /d \"{$projectPath}\" && start /B php artisan queue:work --queue=imports";
-            pclose(popen($command, 'r'));
-        } else {
-            $logFile = storage_path('logs/queue-worker.log');
-            $command = "cd \"{$projectPath}\" && nohup php artisan queue:work --queue=imports >> \"{$logFile}\" 2>&1 &";
-            exec($command);
+        try {
+            if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+                // Windows: Use 'start' with /MIN to run minimized in background
+                // Write output to log file for debugging
+                $command = "cd /d \"{$projectPath}\" && start /MIN /B php artisan queue:work --queue=imports --tries=3 --timeout=120 >> \"{$logFile}\" 2>&1";
+                pclose(popen($command, 'r'));
+                Log::info("Started queue worker in background (Windows).");
+            } else {
+                // Unix/Linux: Use nohup with proper background handling
+                $command = "cd \"{$projectPath}\" && nohup php artisan queue:work --queue=imports --tries=3 --timeout=120 >> \"{$logFile}\" 2>&1 &";
+                exec($command);
+                Log::info("Started queue worker in background (Unix).");
+            }
+            
+            // Give worker a moment to spin up
+            usleep(100000); // 100ms
+            
+            return true;
+        } catch (\Exception $e) {
+            Log::error("Failed to start queue worker: " . $e->getMessage());
+            return false;
         }
-        
-        return true;
     }
 }
