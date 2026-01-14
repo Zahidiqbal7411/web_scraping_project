@@ -136,10 +136,26 @@ class ImportChunkJob implements ShouldQueue
                 if ($existing) {
                     $propertyIdFromDb = $urlData['id'] ?? null;
                     $propertyExists = DB::table('properties')->where('id', $propertyIdFromDb)->exists();
-                    $hasImages = DB::table('property_images')->where('property_id', $propertyIdFromDb)->exists();
                     
-                    if ($propertyExists && $hasImages) {
+                    // Check if already linked to THIS search via pivot table
+                    $alreadyLinked = DB::table('property_saved_search')
+                        ->where('property_id', $propertyIdFromDb)
+                        ->where('saved_search_id', $this->savedSearchId)
+                        ->exists();
+                    
+                    if ($propertyExists && !$alreadyLinked && $this->savedSearchId) {
+                        // FIX: Link existing property to this search immediately!
+                        Log::info("Linking existing property {$propertyIdFromDb} to search {$this->savedSearchId}");
+                        DB::table('property_saved_search')->updateOrInsert(
+                            ['property_id' => $propertyIdFromDb, 'saved_search_id' => $this->savedSearchId],
+                            ['updated_at' => now(), 'created_at' => now()]
+                        );
+                        $savedCount++; // Count as "imported" since it's now in this search
+                    }
+
+                    if ($propertyExists && $alreadyLinked) {
                         $skippedCount++;
+                        Log::debug("Skipping property {$propertyIdFromDb} - already linked to search {$this->savedSearchId}");
                         continue;
                     }
                 }
@@ -173,8 +189,10 @@ class ImportChunkJob implements ShouldQueue
                 
                 foreach ($results['properties'] ?? [] as $property) {
                     try {
-                        $this->saveProperty($property);
-                        $importedCount++;
+                        $wasNew = $this->saveProperty($property);
+                        if ($wasNew) {
+                            $importedCount++;
+                        }
                     } catch (\Exception $e) {
                         Log::warning("Failed to save property: " . $e->getMessage());
                     }
@@ -217,12 +235,36 @@ class ImportChunkJob implements ShouldQueue
 
     /**
      * Save property to database
+     * @return bool True if this was a NEW property, false if it was an update
      */
-    protected function saveProperty(array $property): void
+    protected function saveProperty(array $property): bool
     {
+        $propertyId = $property['id'] ?? null;
+        if (!$propertyId) {
+            return false;
+        }
+
+        // Check if property already exists (to determine if this is new)
+        $existsBefore = DB::table('properties')->where('id', $propertyId)->exists();
+
+        // Check if already linked to THIS search
+        $alreadyLinkedToThisSearch = false;
+        if ($this->savedSearchId) {
+            $alreadyLinkedToThisSearch = DB::table('property_saved_search')
+                ->where('property_id', $propertyId)
+                ->where('saved_search_id', $this->savedSearchId)
+                ->exists();
+        }
+
+        // If already exists AND already linked to this search, this is a TRUE duplicate
+        if ($existsBefore && $alreadyLinkedToThisSearch) {
+            Log::debug("Property {$propertyId} already exists and is linked to search {$this->savedSearchId} - skipping");
+            return false;
+        }
+
         // Use upsert to handle duplicates
         DB::table('properties')->updateOrInsert(
-            ['id' => $property['id'] ?? null],
+            ['id' => $propertyId],
             [
                 'location' => $property['address'] ?? null,
                 'house_number' => $property['house_number'] ?? null,
@@ -243,16 +285,28 @@ class ImportChunkJob implements ShouldQueue
                 'key_features' => json_encode($property['key_features'] ?? []),
                 'description' => $property['description'] ?? null,
                 'sold_link' => $property['sold_link'] ?? null,
-                'filter_id' => $this->savedSearchId,
+                'filter_id' => $this->savedSearchId, // Keep for backward compatibility/legacy
                 'updated_at' => now(),
                 'created_at' => now(),
             ]
         );
 
+        // ATTACH TO SAVED SEARCH (Pivot Table)
+        if ($this->savedSearchId) {
+            DB::table('property_saved_search')->updateOrInsert(
+                [
+                    'property_id' => $propertyId,
+                    'saved_search_id' => $this->savedSearchId
+                ],
+                [
+                    'updated_at' => now(),
+                    'created_at' => now()
+                ]
+            );
+        }
+
         // Save Images
         if (!empty($property['images'])) {
-            $propertyId = $property['id'];
-            
             // Delete existing images for this property to avoid duplicates
             DB::table('property_images')->where('property_id', $propertyId)->delete();
             
@@ -265,6 +319,10 @@ class ImportChunkJob implements ShouldQueue
                 ]);
             }
         }
+
+        // Return true only if the property was NOT already linked to this search
+        // (meaning this is a genuine new import for this search)
+        return !$alreadyLinkedToThisSearch;
     }
 
     /**

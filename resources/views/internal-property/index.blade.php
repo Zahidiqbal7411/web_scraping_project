@@ -1997,9 +1997,13 @@
         // Load a single page of properties from database - OPTIMIZED for speed
         async function loadPropertiesPage(page) {
             try {
-                const url = window.searchContext 
-                    ? `/internal-properties/load?search_id=${window.searchContext.id}&page=${page}&per_page=50` 
-                    : `/internal-properties/load?page=${page}&per_page=50`;
+                // Ensure search_id is explicitly handled as a string parameter if present
+                // This fixes the issue where implicit object-to-string conversion might fail in some browsers
+                let url = `/internal-properties/load?page=${page}&per_page=50`;
+                
+                if (window.searchContext && window.searchContext.id) {
+                    url += `&search_id=${window.searchContext.id}`;
+                }
                 
                 console.log(`Loading page ${page} from:`, url);
                 

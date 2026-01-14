@@ -64,7 +64,10 @@ class InternalPropertyController extends Controller
             $query = \App\Models\Property::query();
             
             if ($searchId) {
-                $query->where('filter_id', $searchId);
+                // Query properties through the pivot table for this specific search
+                $query->whereHas('savedSearches', function($q) use ($searchId) {
+                    $q->where('saved_searches.id', $searchId);
+                });
             }
             
             // Get total count before pagination
@@ -526,31 +529,15 @@ class InternalPropertyController extends Controller
                         \App\Models\Url::whereNull('filter_id')->delete();
                     }
                     
-                    // 2. Find properties for this filter to clean up related data
-                    $propQuery = \App\Models\Property::query();
+                    // 2. Clear associations in pivot table for this filter
                     if ($searchId) {
-                        $propQuery->where('filter_id', $searchId);
+                        \DB::table('property_saved_search')->where('saved_search_id', $searchId)->delete();
                     } else {
-                        $propQuery->whereNull('filter_id');
+                        // If no searchId, we might want to be careful, but the old code was deleting whereNull('filter_id')
+                        // We'll leave it for now or specifically target null filter_ids if needed
                     }
-                    $propertyIds = $propQuery->pluck('id');
                     
-                    if ($propertyIds->isNotEmpty()) {
-                        Log::info("Found " . $propertyIds->count() . " properties to clear for filter_id: " . ($searchId ?? 'NULL'));
-                        
-                        // 3. Delete Sold Prices (no direct cascade from Property to SoldPrice)
-                        $soldIds = \App\Models\PropertySold::whereIn('property_id', $propertyIds)->pluck('id');
-                        if ($soldIds->isNotEmpty()) {
-                            \App\Models\PropertySoldPrice::whereIn('sold_property_id', $soldIds)->delete();
-                            \App\Models\PropertySold::whereIn('id', $soldIds)->delete();
-                        }
-                        
-                        // 4. Delete Images (should cascade but being explicit for safety)
-                        \App\Models\PropertyImage::whereIn('property_id', $propertyIds)->delete();
-                        
-                        // 5. Delete Properties
-                        \App\Models\Property::whereIn('id', $propertyIds)->delete();
-                    }
+                    Log::info("Scoped association clearing complete. Relationships for this filter have been reset.");
                     
                     Log::info("Scoped deletion complete. Old data for this filter has been replaced.");
                     
@@ -718,6 +705,20 @@ class InternalPropertyController extends Controller
                                     'lease_length' => $propData['lease_length'] ?? null
                                 ]
                             );
+
+                            // ATTACH TO SAVED SEARCH (Pivot Table)
+                            if ($targetFilterId) {
+                                \DB::table('property_saved_search')->updateOrInsert(
+                                    [
+                                        'property_id' => $propId,
+                                        'saved_search_id' => $targetFilterId
+                                    ],
+                                    [
+                                        'updated_at' => now(),
+                                        'created_at' => now()
+                                    ]
+                                );
+                            }
                             
                             if ($property) {
                                 $savedCount++;

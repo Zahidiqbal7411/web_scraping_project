@@ -48,6 +48,11 @@ class Property extends Model
         return $this->hasMany(PropertyImage::class, 'property_id', 'id');
     }
 
+    public function savedSearches()
+    {
+        return $this->belongsToMany(SavedSearch::class, 'property_saved_search', 'property_id', 'saved_search_id');
+    }
+
     public function savedSearch()
     {
         return $this->belongsTo(SavedSearch::class, 'filter_id');

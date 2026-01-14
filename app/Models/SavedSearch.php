@@ -22,4 +22,9 @@ class SavedSearch extends Model
         'max_days_since_added',
         'include_sstc',
     ];
+
+    public function properties()
+    {
+        return $this->belongsToMany(Property::class, 'property_saved_search', 'saved_search_id', 'property_id');
+    }
 }

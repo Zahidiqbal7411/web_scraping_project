@@ -10,6 +10,7 @@ use GuzzleHttp\Client;
 use Symfony\Component\DomCrawler\Crawler;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 
 class SavedSearchController extends Controller
 {
@@ -141,28 +142,50 @@ class SavedSearchController extends Controller
 
     public function destroy($id)
     {
-        try {
-            $search = SavedSearch::find($id);
-            if ($search) {
-                // Delete associated URLs first to avoid constraints/orphans
-                try {
+        return DB::transaction(function () use ($id) {
+            try {
+                $search = SavedSearch::find($id);
+                if ($search) {
+                    // 1. Delete associated Schedule record
+                    Schedule::where('saved_search_id', $id)->delete();
+
+                    // 2. Delete associated URLs
                     Url::where('filter_id', $id)->delete();
-                } catch (\Exception $e) {
-                    Log::warning("Failed to clear URLs for search {$id}: " . $e->getMessage());
-                    // Continue to delete search anyway
+
+                    // 3. Delete associated Properties and their related data
+                    // Use scoped deletion logic to ensure all child data is cleaned up
+                    $propertyIds = \App\Models\Property::where('filter_id', $id)->pluck('id');
+                    
+                    if ($propertyIds->isNotEmpty()) {
+                        // Delete Sold Prices and Sold Properties
+                        $soldIds = \App\Models\PropertySold::whereIn('property_id', $propertyIds)->pluck('id');
+                        if ($soldIds->isNotEmpty()) {
+                            \App\Models\PropertySoldPrice::whereIn('sold_property_id', $soldIds)->delete();
+                            \App\Models\PropertySold::whereIn('id', $soldIds)->delete();
+                        }
+                        
+                        // Delete Images
+                        \App\Models\PropertyImage::whereIn('property_id', $propertyIds)->delete();
+                        
+                        // Delete Properties
+                        \App\Models\Property::whereIn('id', $propertyIds)->delete();
+                    }
+                    
+                    $search->delete();
+                    return response()->json([
+                        'success' => true, 
+                        'message' => 'Search and all associated schedule/property data deleted successfully'
+                    ]);
                 }
-                
-                $search->delete();
-                return response()->json(['success' => true, 'message' => 'Search deleted successfully']);
+                return response()->json(['success' => false, 'message' => 'Search not found'], 404);
+            } catch (\Exception $e) {
+                Log::error("Error deleting search {$id}: " . $e->getMessage());
+                return response()->json([
+                    'success' => false, 
+                    'message' => 'Server error deleting search: ' . $e->getMessage()
+                ], 500);
             }
-            return response()->json(['success' => false, 'message' => 'Search not found'], 404);
-        } catch (\Exception $e) {
-            Log::error("Error deleting search {$id}: " . $e->getMessage());
-            return response()->json([
-                'success' => false, 
-                'message' => 'Server error deleting search: ' . $e->getMessage()
-            ], 500);
-        }
+        });
     }
 
     public function update(Request $request, $id)

@@ -600,9 +600,9 @@ class ScheduleController extends Controller
         try {
             if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
                 // Windows: check for php.exe processes and look for queue:work
-                // Use tasklist for better reliability in some environments
-                $output = shell_exec('tasklist /v /fi "imagename eq php.exe" /fo csv 2>&1');
-                return $output && strpos($output, 'queue:work') !== false;
+                // Look specifically for artisan queue:work to avoid false positives with other php scripts
+                $output = shell_exec('tasklist /V /FI "IMAGENAME eq php.exe" /FO CSV 2>&1');
+                return $output && (strpos($output, 'artisan  queue:work') !== false || strpos($output, 'queue:work') !== false);
             } else {
                 exec('pgrep -f "artisan queue:work"', $output, $returnVar);
                 return $returnVar === 0;
@@ -628,15 +628,15 @@ class ScheduleController extends Controller
         try {
             if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
                 // Windows: Use 'start' with /MIN to run minimized in background
-                // Write output to log file for debugging
-                $command = "cd /d \"{$projectPath}\" && start /MIN /B php artisan queue:work --queue=imports --tries=3 --timeout=120 >> \"{$logFile}\" 2>&1";
+                // Prioritize the 'high' queue for setup/orchestration
+                $command = "cd /d \"{$projectPath}\" && start /MIN /B php artisan queue:work --queue=high,imports,default --tries=3 --timeout=120 >> \"{$logFile}\" 2>&1";
                 pclose(popen($command, 'r'));
-                Log::info("Started queue worker in background (Windows).");
+                Log::info("Started prioritized queue worker in background (Windows).");
             } else {
                 // Unix/Linux: Use nohup with proper background handling
-                $command = "cd \"{$projectPath}\" && nohup php artisan queue:work --queue=imports --tries=3 --timeout=120 >> \"{$logFile}\" 2>&1 &";
+                $command = "cd \"{$projectPath}\" && nohup php artisan queue:work --queue=high,imports,default --tries=3 --timeout=120 >> \"{$logFile}\" 2>&1 &";
                 exec($command);
-                Log::info("Started queue worker in background (Unix).");
+                Log::info("Started prioritized queue worker in background (Unix).");
             }
             
             // Give worker a moment to spin up

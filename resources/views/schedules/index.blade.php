@@ -162,7 +162,7 @@
             <p class="text-muted" style="font-size: 1.1rem; margin-bottom: 2rem;">All scheduled tasks have been successfully finalized.</p>
             <div class="d-flex justify-content-center gap-3">
                 <a href="{{ url('/searchproperties') }}" class="btn btn-primary" style="padding: 0.8rem 2rem;">Back to Saved Searches</a>
-                <a href="{{ url('/all-properties') }}" class="btn btn-secondary" style="padding: 0.8rem 2rem; background: var(--bg); color: var(--text-primary); border: 1px solid var(--card-border);">View All Properties</a>
+                <a href="{{ route('internal-property.index') }}" class="btn btn-secondary" style="padding: 0.8rem 2rem; background: var(--bg); color: var(--text-primary); border: 1px solid var(--card-border);">View All Properties</a>
             </div>
         </div>
 

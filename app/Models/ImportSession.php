@@ -68,6 +68,9 @@ class ImportSession extends Model
     public function incrementCompleted(int $propertiesImported = 0, int $propertiesSkipped = 0): self
     {
         $this->increment('completed_jobs');
+        
+        // Note: imported_properties is now primarily for legacy/caching.
+        // The UI will use the actual count from the properties table for accuracy.
         $this->increment('imported_properties', $propertiesImported);
         $this->increment('skipped_properties', $propertiesSkipped);
         
@@ -197,13 +200,30 @@ class ImportSession extends Model
     }
 
     /**
+     * Get actual imported properties count from the properties table
+     */
+    public function getActualImportedCount(): int
+    {
+        if (!$this->saved_search_id) {
+            return $this->imported_properties;
+        }
+
+        // Count unique properties associated with this search via pivot table
+        return \DB::table('property_saved_search')
+            ->where('saved_search_id', $this->saved_search_id)
+            ->count();
+    }
+
+    /**
      * Get progress percentage
      */
     public function getProgressPercentage(): float
     {
+        $currentCount = $this->getActualImportedCount();
+
         // For fetch_details mode, use property counts if available
         if ($this->mode === 'fetch_details' && $this->total_properties > 0) {
-            return round(($this->imported_properties / $this->total_properties) * 100, 1);
+            return round(($currentCount / $this->total_properties) * 100, 1);
         }
 
         if ($this->total_jobs === 0) {
@@ -266,6 +286,8 @@ class ImportSession extends Model
      */
     public function getStatusSummary(): array
     {
+        $actualCount = $this->getActualImportedCount();
+        
         return [
             'id' => $this->id,
             'status' => $this->status,
@@ -276,7 +298,7 @@ class ImportSession extends Model
             'completed_jobs' => $this->completed_jobs,
             'failed_jobs' => $this->failed_jobs,
             'total_properties' => $this->total_properties,
-            'imported_properties' => $this->imported_properties,
+            'imported_properties' => $actualCount, // Show actual unique count for accuracy
             'skipped_properties' => $this->skipped_properties,
             'split_count' => $this->split_count,
             'elapsed_seconds' => $this->getElapsedSeconds(),

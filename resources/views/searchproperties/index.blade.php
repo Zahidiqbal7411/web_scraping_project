@@ -1505,7 +1505,7 @@
                                 <td>${statusHtml}</td>
                                 <td>
                                     <div class="actions">
-                                        <a href="{{ url('internal-properties/search', [], false) }}/${search.id}" class="btn btn-sm" style="background: var(--primary); color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
+                                        <a href="/internal-properties/search/${search.id}" class="btn btn-sm" style="background: var(--primary); color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
                                             <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
                                             Property Details
                                         </a>
@@ -1948,7 +1948,7 @@
                     viewResultsBtn.innerHTML = '<svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg> View Results';
                     document.querySelector('.form-actions').prepend(viewResultsBtn);
                 }
-                viewResultsBtn.href = `{{ url('internal-properties/search', [], false) }}/${id}`;
+                viewResultsBtn.href = `/internal-properties/search/${id}`;
                 viewResultsBtn.style.display = 'inline-flex';
             } else {
                 formVisitUrlBtn.style.display = 'none';

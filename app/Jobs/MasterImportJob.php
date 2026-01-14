@@ -54,8 +54,8 @@ class MasterImportJob implements ShouldQueue
         $this->savedSearchId = $savedSearchId;
         $this->mode = $mode;
         
-        // Run on a specific queue for imports
-        $this->onQueue('imports');
+        // Run on a high priority queue to ensure orchestration starts immediately
+        $this->onQueue('high');
     }
 
     /**
@@ -77,6 +77,19 @@ class MasterImportJob implements ShouldQueue
         
         // Mark session as processing
         $importSession->start();
+        
+        // CLEAR OLD ASSOCIATIONS for this search before starting a fresh import
+        // This prevents property accumulation from old imports and fixes the count discrepancy (e.g. 96 vs 51)
+        if ($this->savedSearchId) {
+            try {
+                Log::info("MASTER: Clearing old associations in pivot table for Search ID: {$this->savedSearchId}");
+                \DB::table('property_saved_search')->where('saved_search_id', $this->savedSearchId)->delete();
+                Log::info("MASTER: Successfully cleared old associations.");
+            } catch (\Exception $e) {
+                Log::error("MASTER: Failed to clear old associations: " . $e->getMessage());
+                // Continue with import anyway
+            }
+        }
         
         try {
             // Extract initial price range from URL (or use defaults)
@@ -130,9 +143,15 @@ class MasterImportJob implements ShouldQueue
             // Get ACTUAL total count from source website instead of estimation
             // This ensures the progress bar shows the correct number
             // Use cache to avoid redundant probes during job retries
-            $cacheKey = 'import_total_' . md5($this->baseUrl);
-            $actualTotalCount = cache()->remember($cacheKey, 3600, function() use ($scraperService) {
-                return $scraperService->probeResultCount($this->baseUrl);
+            $probeUrl = $this->baseUrl;
+            if (strpos($probeUrl, 'includeSSTC=true') === false) {
+                $separator = (strpos($probeUrl, '?') === false) ? '?' : '&';
+                $probeUrl .= $separator . 'includeSSTC=true';
+            }
+
+            $cacheKey = 'import_total_' . md5($probeUrl);
+            $actualTotalCount = cache()->remember($cacheKey, 3600, function() use ($scraperService, $probeUrl) {
+                return $scraperService->probeResultCount($probeUrl);
             });
             
             $importSession->setTotalProperties($actualTotalCount);
@@ -315,22 +334,34 @@ class MasterImportJob implements ShouldQueue
      */
     protected function buildUrlWithPriceRange(string $baseUrl, int $minPrice, int $maxPrice): string
     {
-        $url = $baseUrl;
+        // Parse URL components
+        $parts = parse_url($baseUrl);
+        $queryParams = [];
+        if (isset($parts['query'])) {
+            parse_str($parts['query'], $queryParams);
+        }
+
+        // Remove parameters we want to override
+        unset($queryParams['minPrice']);
+        unset($queryParams['maxPrice']);
+        unset($queryParams['index']);
+        unset($queryParams['includeSSTC']);
+        unset($queryParams['_includeSSTC']);
         
-        // Remove existing price params
-        $url = preg_replace('/&?minPrice=\d+/', '', $url);
-        $url = preg_replace('/&?maxPrice=\d+/', '', $url);
+        // Add our parameters
+        $queryParams['minPrice'] = $minPrice;
+        $queryParams['maxPrice'] = $maxPrice;
+        $queryParams['includeSSTC'] = 'true';
+        $queryParams['sortType'] = $queryParams['sortType'] ?? '2'; // Sort by newest if not set
+
+        // Rebuild query string
+        $newQuery = http_build_query($queryParams);
         
-        // Clean up any double ampersands or trailing ampersands
-        $url = preg_replace('/&&+/', '&', $url);
-        $url = rtrim($url, '&');
-        
-        // Add separator
-        $separator = (strpos($url, '?') === false) ? '?' : '&';
-        
-        // Add price range - Rightmove uses minPrice and maxPrice
-        $url .= "{$separator}minPrice={$minPrice}&maxPrice={$maxPrice}";
-        
+        // Handle encoded commas which http_build_query might encode but Rightmove might prefer as commas
+        $newQuery = str_replace('%2C', ',', $newQuery);
+
+        $url = ($parts['scheme'] ?? 'https') . '://' . ($parts['host'] ?? 'www.rightmove.co.uk') . ($parts['path'] ?? '/property-for-sale/find.html') . '?' . $newQuery;
+
         return $url;
     }
 
@@ -340,48 +371,36 @@ class MasterImportJob implements ShouldQueue
      */
     protected function getUKPriceBands(int $minPrice, int $maxPrice): array
     {
-        // Predefined UK property price bands
-        // Smaller bands at lower prices (where most properties are), larger bands at higher prices
-        $allBands = [
-            ['min' => 0, 'max' => 50000],
-            ['min' => 50000, 'max' => 100000],
-            ['min' => 100000, 'max' => 150000],
-            ['min' => 150000, 'max' => 200000],
-            ['min' => 200000, 'max' => 250000],
-            ['min' => 250000, 'max' => 300000],
-            ['min' => 300000, 'max' => 350000],
-            ['min' => 350000, 'max' => 400000],
-            ['min' => 400000, 'max' => 450000],
-            ['min' => 450000, 'max' => 500000],
-            ['min' => 500000, 'max' => 600000],
-            ['min' => 600000, 'max' => 700000],
-            ['min' => 700000, 'max' => 800000],
-            ['min' => 800000, 'max' => 1000000],
-            ['min' => 1000000, 'max' => 1500000],
-            ['min' => 1500000, 'max' => 2000000],
-            ['min' => 2000000, 'max' => 3000000],
-            ['min' => 3000000, 'max' => 5000000],
-            ['min' => 5000000, 'max' => 15000000],
+        // Rightmove's ACTUAL supported price thresholds
+        // Using these exact values ensures no rounding that causes duplicates
+        $thresholds = [
+            0, 50000, 100000, 150000, 200000, 250000, 300000, 350000, 400000, 
+            450000, 500000, 600000, 700000, 800000, 900000, 1000000, 
+            1250000, 1500000, 2000000, 2500000, 3000000, 5000000, 10000000, 15000000
         ];
         
-        // Filter bands that overlap with user's price range
-        $filteredBands = [];
-        foreach ($allBands as $band) {
-            // Include band if it overlaps with user's range
-            if ($band['max'] > $minPrice && $band['min'] < $maxPrice) {
-                $filteredBands[] = [
-                    'min' => max($band['min'], $minPrice),
-                    'max' => min($band['max'], $maxPrice)
+        $bands = [];
+        for ($i = 0; $i < count($thresholds) - 1; $i++) {
+            $bandMin = $thresholds[$i];
+            $bandMax = $thresholds[$i + 1];
+            
+            // Only include bands that overlap with the user's range
+            if ($bandMax > $minPrice && $bandMin < $maxPrice) {
+                $bands[] = [
+                    'min' => max($bandMin, $minPrice),
+                    'max' => min($bandMax, $maxPrice)
                 ];
             }
         }
         
         // If no bands match (shouldn't happen), use the full range
-        if (empty($filteredBands)) {
-            $filteredBands = [['min' => $minPrice, 'max' => $maxPrice]];
+        if (empty($bands)) {
+            $bands = [['min' => $minPrice, 'max' => $maxPrice]];
         }
         
-        return $filteredBands;
+        Log::info("Generated " . count($bands) . " price bands from £" . number_format($minPrice) . " to £" . number_format($maxPrice));
+        
+        return $bands;
     }
 
     /**

@@ -156,17 +156,24 @@ class RightmoveScraperService
                 }
             }
 
-        // Fallback: look for result count in HTML
-        if (preg_match('/(\d{1,3}(?:,\d{3})*)\s*(?:properties|results)/i', $html, $matches)) {
-            return (int) str_replace(',', '', $matches[1]);
-        }
+            // Fallback: look for result count in HTML using multiple patterns
+            $patterns = [
+                '/(\d{1,3}(?:,\d{3})*)\s*(?:properties|results)\s*for sale/i',
+                '/(\d{1,3}(?:,\d{3})*)\s*(?:properties|results)/i',
+                '/<span>(\d{1,3}(?:,\d{3})*)<\/span>\s*(?:properties|results)/i',
+                '/"resultCount"\s*:\s*"?(\d+)"?/'
+            ];
 
-        // Another pattern for search results
-        if (preg_match('/"resultCount"\s*:\s*"?(\d+)"?/', $html, $matches)) {
-            return (int) $matches[1];
-        }
+            foreach ($patterns as $pattern) {
+                if (preg_match($pattern, $html, $matches)) {
+                    $val = str_replace(',', '', $matches[1]);
+                    if (is_numeric($val) && $val > 0) {
+                        return (int) $val;
+                    }
+                }
+            }
 
-            Log::warning("Could not extract result count from: {$searchUrl}");
+            Log::warning("Could not extract result count from HTML: {$searchUrl}");
             return 0;
 
         } catch (\Exception $e) {
@@ -191,16 +198,34 @@ class RightmoveScraperService
 
         try {
             while ($currentPage < $maxPages) {
-                // Construct page URL
+                // Construct page URL robustly
                 $index = $currentPage * 24;
-                $pageUrl = $searchUrl . (strpos($searchUrl, '?') === false ? '?' : '&') . "index=" . $index;
+                
+                $parts = parse_url($searchUrl);
+                $queryParams = [];
+                if (isset($parts['query'])) {
+                    parse_str($parts['query'], $queryParams);
+                }
+                
+                $queryParams['index'] = $index;
+                $newQuery = http_build_query($queryParams);
+                $newQuery = str_replace('%2C', ',', $newQuery); // Rightmove likes literal commas
+                
+                $pageUrl = ($parts['scheme'] ?? 'https') . '://' . ($parts['host'] ?? 'www.rightmove.co.uk') . ($parts['path'] ?? '/property-for-sale/find.html') . '?' . $newQuery;
                 
                 Log::info("Scraping property URLs from: {$pageUrl}");
                 $html = $this->fetchWithRetry($pageUrl);
-                $foundOnPage = 0;
+                
+                if (empty($html)) {
+                    Log::warning("Page {$currentPage} (index {$index}) returned empty HTML. Stopping pagination.");
+                    break;
+                }
 
+                $foundOnPage = 0;
                 $json = $this->parseJsonData($html);
+                
                 if ($json) {
+                    Log::info("JSON PAGE_MODEL found on page {$currentPage}");
                     // Try multiple paths for properties - Rightmove structure can vary
                     $properties = [];
                     

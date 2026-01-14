@@ -684,10 +684,18 @@ class InternalPropertyService
                  } elseif (isset($jsonData['properties'])) {
                      $results = $jsonData['properties'];
                      Log::info("Found results in: properties");
+                 } elseif (isset($jsonData['props']['pageProps']['propertyData']['soldPricesData']['properties'])) {
+                     $results = $jsonData['props']['pageProps']['propertyData']['soldPricesData']['properties'];
+                     Log::info("Found results in: props.pageProps.propertyData.soldPricesData.properties");
                  } else {
                      Log::warning("⚠️ Could not find results in expected JSON paths");
-                     // Try to find any 'properties' key at any level (2 deep)
+                     // Try to find any 'properties' key at any level (3 deep)
                      foreach ($jsonData as $key => $value) {
+                         if ($key === 'properties' && is_array($value)) {
+                             $results = $value;
+                             Log::info("Found results in: properties (top)");
+                             break;
+                         }
                          if (is_array($value)) {
                              if (isset($value['properties']) && is_array($value['properties'])) {
                                  $results = $value['properties'];
@@ -784,9 +792,17 @@ class InternalPropertyService
                      // Add this page's results to the total
                      $allSoldProperties = array_merge($allSoldProperties, $soldPropertiesOnPage);
                      
-                     // If we got fewer than 25 results, this is likely the last page
-                     if (count($results) < 25) {
-                         Log::info("Got fewer than 25 results on page {$currentPage}. Assuming last page.");
+                     // If we got 0 results, we've definitely reached the end
+                     if (count($results) === 0) {
+                         Log::info("Got 0 results on page {$currentPage}. End of results.");
+                         break;
+                     }
+                     
+                     // Rightmove results can vary (sometimes 25, sometimes less depending on grouping)
+                     // So we only break if we get 0, OR if we've reached a high page count.
+                     // But we can check if the total results on page is significantly less than expected.
+                     if (count($results) < 5 && $currentPage > 1) {
+                         Log::info("Got very few results (" . count($results) . ") on page {$currentPage}. Assuming last page.");
                          break;
                      }
                      

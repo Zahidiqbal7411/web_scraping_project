@@ -103,10 +103,12 @@ class ImportSoldJob implements ShouldQueue
                     }
 
                     // Save to properties_sold
+                    // Unique check includes property_type to handle multiple units at same address
                     $soldRecord = PropertySold::updateOrCreate(
                         [
                             'property_id' => $property->id,
-                            'location' => $soldProp['location'] ?? ''
+                            'location' => $soldProp['location'] ?? '',
+                            'property_type' => $soldProp['property_type'] ?? ''
                         ],
                         [
                             'source_sold_link' => $property->sold_link,
@@ -114,7 +116,6 @@ class ImportSoldJob implements ShouldQueue
                             'road_name' => $soldProp['road_name'] ?? '',
                             'image_url' => $soldProp['image_url'] ?? null,
                             'map_url' => $soldProp['map_url'] ?? null,
-                            'property_type' => $soldProp['property_type'] ?? '',
                             'bedrooms' => $soldProp['bedrooms'] ?? null,
                             'bathrooms' => $soldProp['bathrooms'] ?? null,
                             'tenure' => $soldProp['tenure'] ?? '',
