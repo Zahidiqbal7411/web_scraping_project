@@ -341,32 +341,66 @@ class RightmoveScraperService
 
     /**
      * Fetch URL with retry logic
+     * Enhanced with full browser headers for better anti-bot handling
      */
     public function fetchWithRetry(string $url, int $maxRetries = 3): string
     {
         $attempt = 0;
+        $lastError = null;
+        
         while ($attempt < $maxRetries) {
             try {
+                // Use full browser headers to avoid blocking (same as scrapeAndStore)
                 $response = Http::withHeaders([
                     'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                ])->timeout(30)->get($url);
+                    'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                    'Accept-Language' => 'en-GB,en-US;q=0.9,en;q=0.8',
+                    'Accept-Encoding' => 'gzip, deflate, br',
+                    'Cache-Control' => 'no-cache',
+                    'Pragma' => 'no-cache',
+                    'Sec-Ch-Ua' => '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                    'Sec-Ch-Ua-Mobile' => '?0',
+                    'Sec-Ch-Ua-Platform' => '"Windows"',
+                    'Sec-Fetch-Dest' => 'document',
+                    'Sec-Fetch-Mode' => 'navigate',
+                    'Sec-Fetch-Site' => 'none',
+                    'Sec-Fetch-User' => '?1',
+                    'Upgrade-Insecure-Requests' => '1',
+                    'Connection' => 'keep-alive',
+                ])
+                ->timeout(45)
+                ->withOptions([
+                    'verify' => false, // Disable SSL verification for shared hosting compatibility
+                ])
+                ->get($url);
 
                 if ($response->successful()) {
-                    return $response->body();
+                    $body = $response->body();
+                    Log::debug("fetchWithRetry succeeded for URL (length: " . strlen($body) . " bytes)");
+                    return $body;
                 }
+                
+                $lastError = "HTTP " . $response->status();
+                Log::warning("fetchWithRetry attempt {$attempt}: HTTP {$response->status()} for URL: {$url}");
 
                 $attempt++;
                 if ($attempt < $maxRetries) {
                     usleep(1000000 * $attempt); // Exponential wait
                 }
             } catch (\Exception $e) {
+                $lastError = $e->getMessage();
+                Log::warning("fetchWithRetry attempt {$attempt} exception: {$lastError}");
                 $attempt++;
                 if ($attempt >= $maxRetries) {
-                    throw $e;
+                    Log::error("fetchWithRetry FAILED after {$maxRetries} attempts: {$lastError}");
+                    // Don't throw - return empty to allow graceful handling
+                    return '';
                 }
                 usleep(1000000 * $attempt);
             }
         }
+        
+        Log::warning("fetchWithRetry returning empty after {$maxRetries} attempts. Last error: {$lastError}");
         return '';
     }
 

@@ -144,10 +144,14 @@ class MasterImportJob implements ShouldQueue
             // This ensures the progress bar shows the correct number
             // Use cache to avoid redundant probes during job retries
             $probeUrl = $this->baseUrl;
+            // Do not force includeSSTC=true. Respect the user's URL.
+            // If the user wants STC, it will be in the URL.
+            /* 
             if (strpos($probeUrl, 'includeSSTC=true') === false) {
                 $separator = (strpos($probeUrl, '?') === false) ? '?' : '&';
                 $probeUrl .= $separator . 'includeSSTC=true';
             }
+            */
 
             $cacheKey = 'import_total_' . md5($probeUrl);
             $actualTotalCount = cache()->remember($cacheKey, 3600, function() use ($scraperService, $probeUrl) {
@@ -341,24 +345,37 @@ class MasterImportJob implements ShouldQueue
             parse_str($parts['query'], $queryParams);
         }
 
+        // Check if includeSSTC was in original params
+        $includeSSTC = isset($queryParams['includeSSTC']) ? $queryParams['includeSSTC'] : null;
+        if (!$includeSSTC && isset($queryParams['_includeSSTC'])) {
+             // Handle potential weird param naming
+             $includeSSTC = $queryParams['_includeSSTC']; 
+        }
+
         // Remove parameters we want to override
         unset($queryParams['minPrice']);
         unset($queryParams['maxPrice']);
         unset($queryParams['index']);
+        // Don't unset SSTC yet, we want to preserve it if we captured it
         unset($queryParams['includeSSTC']);
         unset($queryParams['_includeSSTC']);
         
         // Add our parameters
         $queryParams['minPrice'] = $minPrice;
         $queryParams['maxPrice'] = $maxPrice;
-        $queryParams['includeSSTC'] = 'true';
+        
+        // Preserve original SSTC setting if present, otherwise default to false (standard Rightmove behavior)
+        if ($includeSSTC) {
+            $queryParams['includeSSTC'] = $includeSSTC;
+        }
         $queryParams['sortType'] = $queryParams['sortType'] ?? '2'; // Sort by newest if not set
 
         // Rebuild query string
         $newQuery = http_build_query($queryParams);
         
-        // Handle encoded commas which http_build_query might encode but Rightmove might prefer as commas
-        $newQuery = str_replace('%2C', ',', $newQuery);
+        // Handle URL encoding - Rightmove requires certain characters to be unencoded
+        // %2C = comma, %5E = ^ (used in locationIdentifier like REGION^123)
+        $newQuery = str_replace(['%2C', '%5E'], [',', '^'], $newQuery);
 
         $url = ($parts['scheme'] ?? 'https') . '://' . ($parts['host'] ?? 'www.rightmove.co.uk') . ($parts['path'] ?? '/property-for-sale/find.html') . '?' . $newQuery;
 
@@ -367,12 +384,14 @@ class MasterImportJob implements ShouldQueue
 
     /**
      * Get predefined UK property price bands
-     * Uses realistic UK property price distribution for comprehensive coverage
+     * Uses Rightmove's exact thresholds with NON-OVERLAPPING ranges
+     * to prevent duplicate properties at boundary prices
      */
     protected function getUKPriceBands(int $minPrice, int $maxPrice): array
     {
         // Rightmove's ACTUAL supported price thresholds
-        // Using these exact values ensures no rounding that causes duplicates
+        // We use these exact values but offset minPrice by 1 to avoid boundary duplicates
+        // e.g. Band 1: 0-100000, Band 2: 100001-150000 (not 100000-150000)
         $thresholds = [
             0, 50000, 100000, 150000, 200000, 250000, 300000, 350000, 400000, 
             450000, 500000, 600000, 700000, 800000, 900000, 1000000, 
@@ -381,7 +400,8 @@ class MasterImportJob implements ShouldQueue
         
         $bands = [];
         for ($i = 0; $i < count($thresholds) - 1; $i++) {
-            $bandMin = $thresholds[$i];
+            // First band uses exact threshold, subsequent bands use threshold+1 to avoid overlap
+            $bandMin = ($i === 0) ? $thresholds[$i] : $thresholds[$i] + 1;
             $bandMax = $thresholds[$i + 1];
             
             // Only include bands that overlap with the user's range
@@ -398,7 +418,7 @@ class MasterImportJob implements ShouldQueue
             $bands = [['min' => $minPrice, 'max' => $maxPrice]];
         }
         
-        Log::info("Generated " . count($bands) . " price bands from £" . number_format($minPrice) . " to £" . number_format($maxPrice));
+        Log::info("Generated " . count($bands) . " NON-OVERLAPPING price bands from £" . number_format($minPrice) . " to £" . number_format($maxPrice));
         
         return $bands;
     }

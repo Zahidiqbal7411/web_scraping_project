@@ -41,11 +41,13 @@ Route::middleware('auth')->group(function () {
     Route::prefix('searchproperties')->name('searchproperties.')->group(function () {
         Route::get('/', [SavedSearchController::class, 'showPage'])->name('index');
         Route::get('/all', [SavedSearchController::class, 'index'])->name('all');
+        Route::get('/version', [SavedSearchController::class, 'version'])->name('version');
         Route::post('/store', [SavedSearchController::class, 'store'])->name('store');
         Route::delete('/{id}', [SavedSearchController::class, 'destroy'])->name('destroy');
         Route::match(['post', 'put'], '/update/{id}', [SavedSearchController::class, 'update'])->name('update');
         Route::get('/areas', [SavedSearchController::class, 'getAreas'])->name('getAreas');
         Route::post('/check-area', [SavedSearchController::class, 'checkArea'])->name('check-area');
+        Route::get('/{id}/debug', [SavedSearchController::class, 'debugSearch'])->name('debug');
     });
 
     // Schedule Routes (for scheduled property imports)
@@ -58,6 +60,175 @@ Route::middleware('auth')->group(function () {
         Route::post('/{id}/start-queued', [ScheduleController::class, 'startQueuedImport'])->name('start-queued');
         Route::get('/status', [ScheduleController::class, 'getStatus'])->name('status');
         Route::post('/process', [ScheduleController::class, 'processChunk'])->name('process');
+    });
+
+    // TEMPORARY: Debug Route to diagnose 500 Error
+    Route::get('/fix-db', function() {
+        $report = [];
+        $report[] = "<strong>System Diagnostic Report</strong>";
+        $report[] = "PHP Version: " . phpversion();
+        
+        // 1. Check DB Connection
+        try {
+            \Illuminate\Support\Facades\DB::connection()->getPdo();
+            $report[] = "<span style='color:green'>Database Connection: OK</span>";
+        } catch (\Exception $e) {
+            $report[] = "<span style='color:red'>Database Connection: FAILED - " . $e->getMessage() . "</span>";
+            return implode("<br>", $report);
+        }
+
+        // 2. Check Tables
+        try {
+            $tables = \Illuminate\Support\Facades\DB::select('SHOW TABLES'); // MySQL specific
+            // If empty, try query for sqlite or pgsql if needed, but assuming MySQL based on xampp
+            $tableNames = array_map(fn($t) => array_values((array)$t)[0], $tables);
+            $report[] = "Tables found (" . count($tables) . "): " . implode(', ', $tableNames);
+            
+            $requiredTables = ['saved_searches', 'schedules', 'import_sessions'];
+            foreach($requiredTables as $req) {
+                if(in_array($req, $tableNames)) {
+                     $report[] = "<span style='color:green'>Table '$req': Exists</span>";
+                } else {
+                     $report[] = "<span style='color:red; font-weight:bold'>Table '$req': MISSING</span>";
+                }
+            }
+        } catch (\Exception $e) {
+            $report[] = "<span style='color:red'>Listing Tables Failed: " . $e->getMessage() . "</span>";
+        }
+
+        // 3. Check Models and Queries
+        try {
+            if (!class_exists(\App\Models\SavedSearch::class)) throw new Exception("Class App\Models\SavedSearch not found");
+            $count = \App\Models\SavedSearch::count();
+            $report[] = "SavedSearch Count: " . $count;
+            
+            $items = \App\Models\SavedSearch::latest()->take(5)->get();
+            foreach($items as $item) {
+                 $report[] = "Search #{$item->id} ({$item->area}):";
+                 
+                 // Check Schedule Relationship
+                 try {
+                    $schedule = \App\Models\Schedule::where('saved_search_id', $item->id)->first();
+                    if ($schedule) {
+                        $report[] = "&nbsp;&nbsp;- Schedule: Found (ID: {$schedule->id}, Status: {$schedule->status})";
+                        // Check Import Session Access (Potential crash point)
+                        try {
+                             $sess = $schedule->importSession;
+                             $report[] = "&nbsp;&nbsp;- ImportSession Relationship: " . ($sess ? "Found" : "Null (OK)");
+                        } catch(\Exception $e) {
+                             $report[] = "&nbsp;&nbsp;- <span style='color:red'>ImportSession Access Failed: " . $e->getMessage() . "</span>";
+                        }
+                    } else {
+                        $report[] = "&nbsp;&nbsp;- Schedule: None";
+                    }
+                 } catch(\Exception $e) {
+                    $report[] = "&nbsp;&nbsp;- <span style='color:red'>Schedule Query Failed: " . $e->getMessage() . "</span>";
+                 }
+            }
+        } catch (\Exception $e) {
+            $report[] = "<span style='color:red'>SavedSearch Model Query Failed: " . $e->getMessage() . "</span>";
+            $report[] = "<pre>" . $e->getTraceAsString() . "</pre>";
+        }
+
+        // 4. Run Migrations
+        try {
+            \Illuminate\Support\Facades\Artisan::call('migrate', ['--force' => true]);
+            $report[] = "<strong>Migrations Attempted:</strong> " . \Illuminate\Support\Facades\Artisan::output();
+        } catch (\Exception $e) {
+            $report[] = "<span style='color:red'>Migrations Failed: " . $e->getMessage() . "</span>";
+        }
+
+        return implode("<br>", $report);
+    });
+
+    // TEMPORARY: Simple test to verify file upload (NO database)
+    Route::get('/test-api', function() {
+        return response()->json([
+            'success' => true,
+            'message' => 'API is working! Files uploaded correctly.',
+            'version' => '2026-01-15-v2',
+            'php_version' => phpversion(),
+            'timestamp' => now()->toIso8601String(),
+        ]);
+    });
+
+    // TEMPORARY: Clear all caches
+    Route::get('/clear-cache', function() {
+        try {
+            \Illuminate\Support\Facades\Artisan::call('config:clear');
+            \Illuminate\Support\Facades\Artisan::call('cache:clear');
+            \Illuminate\Support\Facades\Artisan::call('route:clear');
+            \Illuminate\Support\Facades\Artisan::call('view:clear');
+            return 'All caches cleared! <a href="/searchproperties">Go to Saved Searches</a>';
+        } catch (\Exception $e) {
+            return 'Error clearing cache: ' . $e->getMessage();
+        }
+    });
+
+    // TEMPORARY: Queue Diagnostic - check why jobs aren't processing
+    Route::get('/queue-debug', function() {
+        $report = [];
+        $report[] = "<h2>Queue Diagnostic Report</h2>";
+        $report[] = "Time: " . now()->toDateTimeString();
+        
+        // 1. Check Queue Connection Setting
+        $queueConnection = config('queue.default');
+        $report[] = "<strong>QUEUE_CONNECTION:</strong> " . $queueConnection;
+        
+        if ($queueConnection !== 'database') {
+            $report[] = "<span style='color:red; font-weight:bold'>⚠ WARNING: Queue is NOT set to 'database'. Jobs won't process!</span>";
+            $report[] = "Fix: Add QUEUE_CONNECTION=database to your .env file";
+        } else {
+            $report[] = "<span style='color:green'>✓ Queue connection is correct</span>";
+        }
+        
+        // 2. Check Jobs Table
+        try {
+            $pendingJobs = \DB::table('jobs')->count();
+            $failedJobs = \DB::table('failed_jobs')->count();
+            $report[] = "<strong>Pending Jobs:</strong> " . $pendingJobs;
+            $report[] = "<strong>Failed Jobs:</strong> " . $failedJobs;
+            
+            if ($pendingJobs > 0) {
+                $firstJob = \DB::table('jobs')->orderBy('id')->first();
+                $report[] = "<strong>First Pending Job:</strong>";
+                $report[] = "&nbsp;&nbsp;Queue: " . $firstJob->queue;
+                $report[] = "&nbsp;&nbsp;Attempts: " . $firstJob->attempts;
+                $payload = json_decode($firstJob->payload, true);
+                $report[] = "&nbsp;&nbsp;Job Class: " . ($payload['displayName'] ?? 'Unknown');
+            }
+        } catch (\Exception $e) {
+            $report[] = "<span style='color:red'>Jobs table error: " . $e->getMessage() . "</span>";
+        }
+        
+        // 3. Check Schedule status
+        try {
+            $schedules = \App\Models\Schedule::all();
+            $report[] = "<strong>Schedules:</strong> " . $schedules->count();
+            foreach ($schedules as $s) {
+                $statusLabel = ['Pending', 'Importing', 'Completed', 'Failed'][$s->status] ?? 'Unknown';
+                $report[] = "&nbsp;&nbsp;#{$s->id} {$s->name}: {$statusLabel}";
+            }
+        } catch (\Exception $e) {
+            $report[] = "<span style='color:red'>Schedule table error: " . $e->getMessage() . "</span>";
+        }
+        
+        // 4. Test processing ONE job manually
+        $report[] = "<hr><strong>Manual Job Processing Test:</strong>";
+        try {
+            \Illuminate\Support\Facades\Artisan::call('queue:work', [
+                '--queue' => 'high,imports,default',
+                '--once' => true,
+                '--timeout' => 60,
+            ]);
+            $output = \Illuminate\Support\Facades\Artisan::output();
+            $report[] = "<pre>" . htmlspecialchars($output) . "</pre>";
+            $report[] = "<span style='color:green'>✓ queue:work executed successfully</span>";
+        } catch (\Exception $e) {
+            $report[] = "<span style='color:red'>queue:work FAILED: " . $e->getMessage() . "</span>";
+        }
+        
+        return implode("<br>", $report);
     });
 });
 

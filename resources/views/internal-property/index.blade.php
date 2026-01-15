@@ -1807,7 +1807,7 @@
             return originalFetch(...args);
         };
         
-        window.searchContext = @json($search ?? null);
+        // window.searchContext removed here - it is defined in the main script block below
     </script>
     <script>
         

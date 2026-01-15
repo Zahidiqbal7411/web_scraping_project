@@ -29,68 +29,32 @@ class ScheduleController extends Controller
 
     /**
      * Display the schedule management page
-     * Resets all schedules and clears all property data
+     * Shows existing schedules without modifying any data
      */
     public function index()
     {
-        try {
-            Log::info("Schedule page accessed: Triggering full reset and cleanup.");
-
-            // 1. Clear all property-related tables
-            DB::statement('SET FOREIGN_KEY_CHECKS=0');
-            DB::table('properties')->truncate();
-            DB::table('property_images')->truncate();
-            DB::table('properties_sold')->truncate();
-            DB::table('properties_sold_prices')->truncate();
-            DB::table('urls')->truncate();
-            DB::table('import_sessions')->truncate();
+        // Get all saved searches for the dropdown
+        $savedSearches = SavedSearch::orderBy('area')->get();
+        
+        // Get existing schedules
+        $schedules = Schedule::orderBy('id', 'asc')->get();
+        
+        // Auto-create schedules for saved searches that don't have one yet
+        foreach ($savedSearches as $search) {
+            $existingSchedule = Schedule::where('saved_search_id', $search->id)->first();
             
-            // Also delete any failed jobs if they exist to start fresh
-            DB::table('jobs')->truncate();
-            DB::table('failed_jobs')->truncate();
-            
-            DB::statement('SET FOREIGN_KEY_CHECKS=1');
-
-            // 2. Reset all schedules to pending status
-            Schedule::query()->update([
-                'status' => Schedule::STATUS_PENDING,
-                'total_properties' => 0,
-                'imported_count' => 0,
-                'current_page' => 0,
-                'total_pages' => 0,
-                'import_session_id' => null,
-                'url_import_completed' => false,
-                'property_import_completed' => false,
-                'sold_import_completed' => false,
-                'error_message' => null,
-                'started_at' => null,
-                'completed_at' => null,
-            ]);
-
-            // 3. Auto-schedule all saved searches that don't have pending/importing schedules
-            $savedSearches = SavedSearch::orderBy('area')->get();
-            
-            foreach ($savedSearches as $search) {
-                // Since we just reset everything, we just need to ensure all active searches have a schedule record
-                $existingSchedule = Schedule::where('saved_search_id', $search->id)->first();
-                
-                if (!$existingSchedule && $search->updates_url) {
-                    Schedule::create([
-                        'saved_search_id' => $search->id,
-                        'name' => $search->area ?? 'Search #' . $search->id,
-                        'url' => $search->updates_url,
-                        'status' => Schedule::STATUS_PENDING,
-                    ]);
-                    Log::info("Created schedule for saved search #{$search->id}: {$search->area}");
-                }
+            if (!$existingSchedule && $search->updates_url) {
+                Schedule::create([
+                    'saved_search_id' => $search->id,
+                    'name' => $search->area ?? 'Search #' . $search->id,
+                    'url' => $search->updates_url,
+                    'status' => Schedule::STATUS_PENDING,
+                ]);
+                Log::info("Created schedule for saved search #{$search->id}: {$search->area}");
             }
-            
-            Log::info("Full reset and cleanup completed.");
-
-        } catch (\Exception $e) {
-            Log::error("Failed to reset schedules and clear data: " . $e->getMessage());
         }
-
+        
+        // Refresh schedules list after potential additions
         $schedules = Schedule::orderBy('id', 'asc')->get();
         
         return view('schedules.index', compact('schedules', 'savedSearches'));
@@ -219,7 +183,7 @@ class ScheduleController extends Controller
                 'saved_search_id' => $schedule->saved_search_id,
                 'base_url' => $schedule->url,
                 'status' => ImportSession::STATUS_PENDING,
-                'mode' => 'urls_only', // Use the two-pass approach as requested
+                'mode' => 'full', // Use full mode to save property details to database
             ]);
 
             // Link schedule to session
@@ -233,7 +197,7 @@ class ScheduleController extends Controller
             $this->startQueueWorkerIfNeeded();
 
             // Dispatch the MasterImportJob in 'urls_only' mode
-            MasterImportJob::dispatch($importSession, $schedule->url, $schedule->saved_search_id, 'urls_only')
+            MasterImportJob::dispatch($importSession, $schedule->url, $schedule->saved_search_id, 'full')
                 ->onQueue('imports');
 
             return response()->json([
@@ -317,7 +281,7 @@ class ScheduleController extends Controller
                     'saved_search_id' => $schedule->saved_search_id,
                     'base_url' => $schedule->url,
                     'status' => ImportSession::STATUS_PENDING,
-                    'mode' => 'urls_only',
+                    'mode' => 'full', // Use full mode to save property details to database
                 ]);
 
                 $schedule->update([
@@ -329,7 +293,7 @@ class ScheduleController extends Controller
                 // Auto-start queue worker if not running
                 $this->startQueueWorkerIfNeeded();
 
-                MasterImportJob::dispatch($importSession, $schedule->url, $schedule->saved_search_id, 'urls_only')
+                MasterImportJob::dispatch($importSession, $schedule->url, $schedule->saved_search_id, 'full')
                     ->onQueue('imports');
 
                 return response()->json([
@@ -594,26 +558,37 @@ class ScheduleController extends Controller
 
     /**
      * Check if a queue worker process is already running
+     * Returns false on shared hosting where shell functions are disabled
      */
     private function isQueueWorkerRunning(): bool
     {
         try {
             if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
                 // Windows: check for php.exe processes and look for queue:work
-                // Look specifically for artisan queue:work to avoid false positives with other php scripts
-                $output = shell_exec('tasklist /V /FI "IMAGENAME eq php.exe" /FO CSV 2>&1');
+                if (!function_exists('shell_exec') || !$this->isShellFunctionEnabled('shell_exec')) {
+                    Log::debug("shell_exec disabled, assuming no queue worker running (cron-based system)");
+                    return false;
+                }
+                $output = @shell_exec('tasklist /V /FI "IMAGENAME eq php.exe" /FO CSV 2>&1');
                 return $output && (strpos($output, 'artisan  queue:work') !== false || strpos($output, 'queue:work') !== false);
             } else {
-                exec('pgrep -f "artisan queue:work"', $output, $returnVar);
+                // Unix/Linux - check if exec is available
+                if (!function_exists('exec') || !$this->isShellFunctionEnabled('exec')) {
+                    Log::debug("exec disabled, assuming no queue worker running (cron-based system)");
+                    return false;
+                }
+                @exec('pgrep -f "artisan queue:work"', $output, $returnVar);
                 return $returnVar === 0;
             }
         } catch (\Exception $e) {
+            Log::warning("Error checking queue worker status: " . $e->getMessage());
             return false;
         }
     }
 
     /**
      * Start the queue worker as a background process if not already running
+     * On shared hosting (cPanel), shell functions may be disabled - queue runs via cron instead
      */
     private function startQueueWorkerIfNeeded(): bool
     {
@@ -628,14 +603,21 @@ class ScheduleController extends Controller
         try {
             if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
                 // Windows: Use 'start' with /MIN to run minimized in background
-                // Prioritize the 'high' queue for setup/orchestration
+                if (!function_exists('popen') || !$this->isShellFunctionEnabled('popen')) {
+                    Log::info("popen disabled on this server. Queue worker must run via cron.");
+                    return false;
+                }
                 $command = "cd /d \"{$projectPath}\" && start /MIN /B php artisan queue:work --queue=high,imports,default --tries=3 --timeout=120 >> \"{$logFile}\" 2>&1";
-                pclose(popen($command, 'r'));
+                @pclose(@popen($command, 'r'));
                 Log::info("Started prioritized queue worker in background (Windows).");
             } else {
                 // Unix/Linux: Use nohup with proper background handling
+                if (!function_exists('exec') || !$this->isShellFunctionEnabled('exec')) {
+                    Log::info("exec disabled on this server. Queue worker must run via cron.");
+                    return false;
+                }
                 $command = "cd \"{$projectPath}\" && nohup php artisan queue:work --queue=high,imports,default --tries=3 --timeout=120 >> \"{$logFile}\" 2>&1 &";
-                exec($command);
+                @exec($command);
                 Log::info("Started prioritized queue worker in background (Unix).");
             }
             
@@ -647,5 +629,15 @@ class ScheduleController extends Controller
             Log::error("Failed to start queue worker: " . $e->getMessage());
             return false;
         }
+    }
+    
+    /**
+     * Check if a shell function is enabled (not in disabled_functions)
+     */
+    private function isShellFunctionEnabled(string $functionName): bool
+    {
+        $disabled = explode(',', ini_get('disable_functions'));
+        $disabled = array_map('trim', $disabled);
+        return !in_array($functionName, $disabled);
     }
 }

@@ -1521,8 +1521,11 @@
                     searchesBody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:2rem;color:var(--error);">Failed to load searches</td></tr>';
                 }
             } catch (error) {
-                console.error(error);
-                searchesBody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:2rem;color:var(--error);">Error loading searches</td></tr>';
+                console.error('Load Error details:', error);
+                searchesBody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:2rem;color:var(--error);">
+                    <div>Error loading searches</div>
+                    <div style="font-size:0.8em;color:var(--text-secondary);margin-top:0.5rem;">${error.message || error}</div>
+                </td></tr>`;
             }
         }
 

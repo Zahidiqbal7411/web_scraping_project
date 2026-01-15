@@ -19,45 +19,88 @@ class SavedSearchController extends Controller
         return view('searchproperties.index');
     }
 
+    // Version check to verify correct file is on server
+    public function version()
+    {
+        return response()->json([
+            'version' => '2026-01-15-v3-fixed',
+            'file' => __FILE__,
+            'time' => now()->toIso8601String(),
+        ]);
+    }
+
     public function index(Request $request)
     {
-        $query = SavedSearch::query();
-        
-        // Search by location/area
-        if ($request->has('search') && $request->search !== '') {
-            $query->where('area', 'LIKE', '%' . $request->search . '%');
+        try {
+            $query = SavedSearch::query();
+            
+            if ($request->has('search') && $request->search !== '') {
+                $query->where('area', 'LIKE', '%' . $request->search . '%');
+            }
+            
+            $perPage = min(max((int) $request->input('per_page', 10), 10), 100);
+            $searches = $query->latest()->paginate($perPage);
+            
+            // Include schedule data with proper formatting - with individual try-catch
+            $items = collect($searches->items())->map(function($search) {
+                try {
+                    // Fetch the schedule for this saved search
+                    $schedule = Schedule::where('saved_search_id', $search->id)->first();
+                    
+                    if ($schedule) {
+                        $search->schedule = [
+                            'id' => $schedule->id,
+                            'status' => $schedule->status,
+                            'status_label' => $schedule->getStatusLabel(),
+                            'status_color' => $schedule->getStatusColor(),
+                            'is_importing' => $schedule->status === Schedule::STATUS_IMPORTING,
+                            'progress' => $schedule->getProgressPercentage(),
+                            'imported_count' => $schedule->imported_count ?? 0,
+                            'total_properties' => $schedule->total_properties ?? 0,
+                        ];
+                    } else {
+                        $search->schedule = null;
+                    }
+                } catch (\Throwable $e) {
+                    // If schedule lookup fails, just set to null
+                    Log::warning("Schedule lookup failed for search {$search->id}: " . $e->getMessage());
+                    $search->schedule = null;
+                }
+                
+                return $search;
+            });
+            
+            return response()->json([
+                'success' => true,
+                'searches' => $items,
+                'pagination' => [
+                    'current_page' => $searches->currentPage(),
+                    'last_page' => $searches->lastPage(),
+                    'per_page' => $searches->perPage(),
+                    'total' => $searches->total(),
+                    'has_more_pages' => $searches->hasMorePages(),
+                    'has_previous_page' => $searches->currentPage() > 1,
+                ]
+            ]);
+        } catch (\Throwable $e) {
+            Log::error("SavedSearchController::index error: " . $e->getMessage());
+            Log::error("Stack trace: " . $e->getTraceAsString());
+            return response()->json([
+                'success' => false,
+                'message' => 'Error loading searches: ' . $e->getMessage(),
+                'error_file' => $e->getFile(),
+                'error_line' => $e->getLine(),
+                'searches' => [],
+                'pagination' => [
+                    'current_page' => 1,
+                    'last_page' => 1,
+                    'per_page' => 10,
+                    'total' => 0,
+                    'has_more_pages' => false,
+                    'has_previous_page' => false,
+                ]
+            ]);
         }
-        
-        // Paginate results (default 10 per page, max 100)
-        $perPage = min(max((int) $request->input('per_page', 10), 10), 100);
-        $searches = $query->latest()->paginate($perPage);
-        
-        // Include schedule data
-        $items = collect($searches->items())->map(function($search) {
-            $schedule = Schedule::where('saved_search_id', $search->id)->first();
-            $search->schedule = $schedule ? [
-                'id' => $schedule->id,
-                'status' => $schedule->status,
-                'status_label' => $schedule->getStatusLabel(),
-                'status_color' => $schedule->getStatusColor(),
-                'progress' => $schedule->importSession ? $schedule->importSession->getProgressPercentage() : $schedule->getProgressPercentage(),
-                'is_importing' => $schedule->status === Schedule::STATUS_IMPORTING,
-            ] : null;
-            return $search;
-        });
-        
-        return response()->json([
-            'success' => true,
-            'searches' => $items,
-            'pagination' => [
-                'current_page' => $searches->currentPage(),
-                'last_page' => $searches->lastPage(),
-                'per_page' => $searches->perPage(),
-                'total' => $searches->total(),
-                'has_more_pages' => $searches->hasMorePages(),
-                'has_previous_page' => $searches->currentPage() > 1,
-            ]
-        ]);
     }
 
     public function store(Request $request)
@@ -776,5 +819,79 @@ class SavedSearchController extends Controller
             ['name' => 'North East England', 'identifier' => 'REGION^27352'],
             ['name' => 'North West England', 'identifier' => 'REGION^27364'],
         ];
+    }
+
+    /**
+     * Debug method to inspect a saved search and its properties
+     * URL: /saved-searches/{id}/debug
+     */
+    public function debugSearch($id)
+    {
+        try {
+            // If ID is 'all', show global overview
+            if ($id === 'all' || $id === '0') {
+                $allSearches = SavedSearch::withCount('properties')->get();
+                $allSchedules = \App\Models\Schedule::all()->keyBy('saved_search_id');
+                
+                $overview = [];
+                foreach ($allSearches as $search) {
+                    $pivotCount = \DB::table('property_saved_search')
+                        ->where('saved_search_id', $search->id)
+                        ->count();
+                    $schedule = $allSchedules->get($search->id);
+                    
+                    $overview[] = [
+                        'search_id' => $search->id,
+                        'area' => $search->area,
+                        'properties_via_relationship' => $search->properties_count,
+                        'properties_via_pivot' => $pivotCount,
+                        'schedule_status' => $schedule ? $schedule->status : 'NO SCHEDULE',
+                        'schedule_imported' => $schedule ? $schedule->imported_count : 0,
+                    ];
+                }
+                
+                // Count orphan properties (not linked to any search)
+                $linkedPropertyIds = \DB::table('property_saved_search')->distinct()->pluck('property_id');
+                $orphanCount = \App\Models\Property::whereNotIn('id', $linkedPropertyIds)->count();
+                
+                return response()->json([
+                    'total_properties_in_db' => \App\Models\Property::count(),
+                    'total_pivot_entries' => \DB::table('property_saved_search')->count(),
+                    'orphan_properties' => $orphanCount,
+                    'searches' => $overview,
+                ]);
+            }
+            
+            // Single search debug
+            $search = SavedSearch::withCount('properties')->findOrFail($id);
+            $schedule = \App\Models\Schedule::where('saved_search_id', $id)->first();
+            
+            // detailed property check
+            $linkedProperties = \DB::table('property_saved_search')
+                ->where('saved_search_id', $id)
+                ->count();
+                
+            $totalProperties = \App\Models\Property::count();
+            
+            return response()->json([
+                'search_id' => $search->id,
+                'area' => $search->area,
+                'properties_count_via_relationship' => $search->properties_count,
+                'properties_count_via_pivot_table' => $linkedProperties,
+                'total_properties_in_db' => $totalProperties,
+                'schedule' => $schedule ? [
+                    'id' => $schedule->id,
+                    'status' => $schedule->status,
+                    'imported_count' => $schedule->imported_count,
+                    'total_properties' => $schedule->total_properties,
+                ] : null,
+                'sample_linked_property_ids' => \DB::table('property_saved_search')
+                    ->where('saved_search_id', $id)
+                    ->limit(5)
+                    ->pluck('property_id')
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
     }
 }

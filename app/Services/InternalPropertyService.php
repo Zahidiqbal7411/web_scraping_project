@@ -71,17 +71,19 @@ class InternalPropertyService
                     }
                 }
 
-                // Check DATABASE (New logic)
-                // Try to extract ID from URL
+                // Check DATABASE - only use cached record if it has COMPLETE data
+                // This ensures properties with missing details get re-fetched
                 if (preg_match('/properties\/(\d+)/', $propertyUrl, $matches)) {
                     $propId = $matches[1];
                     $dbProperty = \App\Models\Property::with('images')->where('id', $propId)->first();
                     
-                    if ($dbProperty && $dbProperty->images->count() > 0) {
-                        // Always use DB record if found, even if incomplete
-                        // We trust the import process to have done its best
-                        Log::info("Found property with images in DB: {$propId}");
-                        // Construct data format matching what parsePropertyFromHtml returns
+                    // ONLY skip fetching if property has BOTH images AND description
+                    // This fixes the issue where old imports (urls_only mode) created empty records
+                    $hasImages = $dbProperty && $dbProperty->images->count() > 0;
+                    $hasDescription = $dbProperty && !empty($dbProperty->description);
+                    
+                    if ($hasImages && $hasDescription) {
+                        Log::info("Using complete DB record for property: {$propId}");
                         $images = $dbProperty->images->pluck('image_link')->toArray();
                         $keyFeatures = json_decode($dbProperty->key_features, true) ?? [];
                         
@@ -122,6 +124,9 @@ class InternalPropertyService
                         $properties[] = $finalProperty;
                         $processed++;
                         continue; // Skip HTTP request
+                    } elseif ($dbProperty) {
+                        // Property exists but is incomplete - will re-fetch
+                        Log::info("Property {$propId} exists but is incomplete (images: " . ($hasImages ? 'yes' : 'no') . ", description: " . ($hasDescription ? 'yes' : 'no') . "). Will re-fetch.");
                     }
                 }
                 

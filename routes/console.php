@@ -10,7 +10,7 @@ Artisan::command('inspire', function () {
 
 // Queue worker for cPanel/shared hosting
 // This runs every minute via cron, processes jobs, then verify if schedule logic needs to run
-Schedule::command('queue:work --queue=high,imports,default --stop-when-empty --tries=3 --timeout=120')
+Schedule::command('queue:work --queue=high,imports,default --max-time=55 --tries=3 --timeout=120')
     ->everyMinute()
     ->withoutOverlapping()
     ->runInBackground();

@@ -63,12 +63,15 @@ class InternalPropertyController extends Controller
             // Build query for properties
             $query = \App\Models\Property::query();
             
-            if ($searchId) {
-                // Query properties through the pivot table for this specific search
-                $query->whereHas('savedSearches', function($q) use ($searchId) {
-                    $q->where('saved_searches.id', $searchId);
-                });
-            }
+        if ($searchId && $searchId !== 'null' && $searchId !== 'undefined') {
+            // Query properties through the pivot table for this specific search
+            $query->whereHas('savedSearches', function($q) use ($searchId) {
+                $q->where('saved_searches.id', $searchId);
+            });
+            Log::info("Filtering query by saved_search_id: {$searchId}");
+        } else {
+            Log::info("No search filter applied (showing all properties)");
+        }
             
             // Get total count before pagination
             $totalCount = $query->count();
