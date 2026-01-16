@@ -1899,6 +1899,21 @@
 
         // Load full property data from database on page startup
         async function loadFromDatabaseOnStartup() {
+            // DEBUG: Log search context to diagnose display issues
+            console.log('=== STARTUP DEBUG ===');
+            console.log('Current URL:', window.location.href);
+            console.log('window.searchContext:', window.searchContext);
+            console.log('searchContext type:', typeof window.searchContext);
+            
+            if (window.searchContext) {
+                console.log('searchContext.id:', window.searchContext.id);
+                console.log('searchContext.area:', window.searchContext.area);
+                console.log('Full searchContext keys:', Object.keys(window.searchContext));
+            } else {
+                console.warn('WARNING: window.searchContext is NULL or undefined');
+                console.log('This means no search_id filter will be applied - showing ALL properties');
+            }
+            
             try {
                 loading.classList.add('active');
                 emptyState.classList.remove('active');
@@ -1906,11 +1921,14 @@
                 // Load first page
                 const data = await loadPropertiesPage(1);
                 
+                console.log('API Response:', data);
+                
                 if (!data || !data.properties || data.properties.length === 0) {
                     loading.classList.remove('active');
                     emptyState.classList.add('active');
                     statsBar.style.display = 'none';
-                    console.log('No properties in database. Click Import to fetch from source.');
+                    console.log('No properties in database for this search. Click Import to fetch from source.');
+                    console.log('Search ID used:', window.searchContext ? window.searchContext.id : 'NONE (all properties)');
                     return;
                 }
                 
@@ -2001,11 +2019,22 @@
                 // This fixes the issue where implicit object-to-string conversion might fail in some browsers
                 let url = `/internal-properties/load?page=${page}&per_page=50`;
                 
+                // DEBUG: Log the exact search context being used
+                console.log('=== loadPropertiesPage DEBUG ===');
+                console.log('Page requested:', page);
+                console.log('window.searchContext:', window.searchContext);
+                console.log('searchContext type:', typeof window.searchContext);
+                
                 if (window.searchContext && window.searchContext.id) {
-                    url += `&search_id=${window.searchContext.id}`;
+                    const searchId = window.searchContext.id;
+                    url += `&search_id=${searchId}`;
+                    console.log(`✓ search_id ADDED to URL: ${searchId}`);
+                } else {
+                    console.warn('⚠ NO search_id - will load ALL properties!');
+                    console.log('Reason: window.searchContext is:', window.searchContext);
                 }
                 
-                console.log(`Loading page ${page} from:`, url);
+                console.log('Final API URL:', url);
                 
                 const response = await fetch(url, {
                     method: 'GET',

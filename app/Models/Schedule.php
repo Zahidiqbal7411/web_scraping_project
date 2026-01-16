@@ -217,7 +217,7 @@ class Schedule extends Model
      */
     public function getProgressPercentage(): float
     {
-        if ($this->total_pages === 0) {
+        if (empty($this->total_pages) || $this->total_pages <= 0) {
             return 0;
         }
         return round(($this->current_page / $this->total_pages) * 100, 1);

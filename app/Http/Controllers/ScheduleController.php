@@ -255,6 +255,10 @@ class ScheduleController extends Controller
      */
     public function processChunk()
     {
+        // Prevent timeout during heavy processing
+        set_time_limit(120);
+        
+        Log::emergency("=== DEBUG: processChunk called at " . now()->toDateTimeString() . " ===");
         try {
             // Find currently importing schedule or get next pending
             $schedule = Schedule::where('status', Schedule::STATUS_IMPORTING)
@@ -293,8 +297,16 @@ class ScheduleController extends Controller
                 // Auto-start queue worker if not running
                 $this->startQueueWorkerIfNeeded();
 
-                MasterImportJob::dispatch($importSession, $schedule->url, $schedule->saved_search_id, 'full')
-                    ->onQueue('imports');
+                try {
+                    Log::info("DISPATCH DEBUG: About to dispatch MasterImportJob for session {$importSession->id}");
+                    MasterImportJob::dispatch($importSession, $schedule->url, $schedule->saved_search_id, 'full')
+                        ->onQueue('imports');
+                    Log::info("DISPATCH DEBUG: Successfully dispatched MasterImportJob for session {$importSession->id}");
+                } catch (\Throwable $e) {
+                    Log::error("DISPATCH ERROR: Failed to dispatch MasterImportJob: " . $e->getMessage());
+                    Log::error($e->getTraceAsString());
+                    // Don't crash here, just log it. The next poll might succeed or the user can retry.
+                }
 
                 return response()->json([
                     'success' => true,
@@ -314,6 +326,29 @@ class ScheduleController extends Controller
                 $this->startQueueWorkerIfNeeded();
                 // Refresh session to get latest status
                 $session->refresh();
+            }
+
+            // AUTO-RECOVERY: Detect Zombie Session (Schedule is IMPORTING, but Session is still PENDING)
+            // This happens if the previous request timed out before dispatching the job
+            if ($session && $session->status === ImportSession::STATUS_PENDING && $session->created_at->diffInMinutes(now()) >= 1) {
+                Log::warning("Detected Zombie Session {$session->id} (Pending for >1m). Re-dispatching MasterImportJob.");
+                
+                // CRITICAL FIX: Reset job counts to prevent cumulative inflation on re-dispatch
+                $session->update(['total_jobs' => 0, 'completed_jobs' => 0, 'failed_jobs' => 0]);
+                
+                $this->startQueueWorkerIfNeeded();
+                
+                MasterImportJob::dispatch($session, $schedule->url, $schedule->saved_search_id, 'full')
+                    ->onQueue('imports');
+                    
+                return response()->json([
+                    'success' => true,
+                    'done' => false,
+                    'schedule_id' => $schedule->id,
+                    'schedule_name' => $schedule->name,
+                    'progress_percentage' => 0,
+                    'message' => "Recovering stuck import process..."
+                ]);
             }
 
             // FALLBACK: Detect stuck URL phase and trigger fetch details directly
@@ -346,10 +381,27 @@ class ScheduleController extends Controller
 
             $progress = $session ? $session->getProgressPercentage() : $schedule->getProgressPercentage();
             
-            if ($schedule->status === Schedule::STATUS_COMPLETED) {
+            // Check if session is actually finished
+            $isSessionFinished = $session && ($session->completed_jobs + $session->failed_jobs >= $session->total_jobs) && $session->total_jobs > 0;
+            
+            if ($schedule->status === Schedule::STATUS_COMPLETED || $isSessionFinished || $progress >= 100) {
+                // Ensure status is up to date
+                if ($schedule->status !== Schedule::STATUS_COMPLETED) {
+                    $schedule->update([
+                        'status' => Schedule::STATUS_COMPLETED,
+                        'completed_at' => now(),
+                        'property_import_completed' => true
+                    ]);
+                    Log::info("Marked schedule #{$schedule->id} ({$schedule->name}) as COMPLETED");
+                }
+
+                // Check if there are more pending schedules
+                $nextPending = Schedule::where('status', Schedule::STATUS_PENDING)->count();
+                Log::info("Schedule #{$schedule->id} finished. Remaining pending schedules: {$nextPending}");
+
                 return response()->json([
                     'success' => true,
-                    'done' => false,
+                    'done' => false, // Keep polling to pick up the next schedule!
                     'schedule_completed' => true,
                     'schedule_id' => $schedule->id,
                     'schedule_name' => $schedule->name,
@@ -362,6 +414,17 @@ class ScheduleController extends Controller
             // Show the accurate total - use max of completed and total in case more jobs were added dynamically
             $displayTotal = $session ? max($session->completed_jobs, $session->total_jobs) : 0;
             $message = $session ? "Queued processing... ({$session->completed_jobs}/{$displayTotal} chunks)" : "Processing {$schedule->name}...";
+
+            // DETECT FAILED SESSION: If session is failed but schedule is import, fail the schedule
+            if ($session && $session->status === ImportSession::STATUS_FAILED) {
+                 $schedule->markAsFailed($session->error_message ?? 'Import session failed');
+                 return response()->json([
+                    'success' => false,
+                    'done' => true,
+                    'error' => 'Import failed: ' . ($session->error_message ?? 'Unknown error'),
+                    'message' => 'Import failed. Please check logs.'
+                ]);
+            }
 
             // If master job is still pending or initializing
             if ($session && $session->total_jobs === 0) {
@@ -377,12 +440,16 @@ class ScheduleController extends Controller
                 'message' => $message
             ]);
 
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error("Schedule processing error: " . $e->getMessage());
             Log::error($e->getTraceAsString());
             
-            if (isset($schedule)) {
-                $schedule->markAsFailed($e->getMessage());
+            if (isset($schedule) && $schedule) {
+                try {
+                    $schedule->markAsFailed($e->getMessage());
+                } catch (\Throwable $ex) {
+                    // Ignore fail on marking fail
+                }
             }
 
             return response()->json([
@@ -390,7 +457,7 @@ class ScheduleController extends Controller
                 'done' => false,
                 'error' => $e->getMessage(),
                 'message' => 'Error: ' . $e->getMessage()
-            ], 500);
+            ], 200); // Return 200 OK even on error so frontend can catch and display message
         }
     }
 
@@ -564,13 +631,16 @@ class ScheduleController extends Controller
     {
         try {
             if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
-                // Windows: check for php.exe processes and look for queue:work
+                // Windows: Use wmic to check command line arguments (more reliable than tasklist)
                 if (!function_exists('shell_exec') || !$this->isShellFunctionEnabled('shell_exec')) {
                     Log::debug("shell_exec disabled, assuming no queue worker running (cron-based system)");
                     return false;
                 }
-                $output = @shell_exec('tasklist /V /FI "IMAGENAME eq php.exe" /FO CSV 2>&1');
-                return $output && (strpos($output, 'artisan  queue:work') !== false || strpos($output, 'queue:work') !== false);
+                // WMIC command to get command line of all php.exe processes
+                $output = @shell_exec('wmic process where "name=\'php.exe\'" get commandline 2>&1');
+                
+                // Check if any line contains "queue:work"
+                return $output && (strpos($output, 'artisan queue:work') !== false || strpos($output, 'artisan  queue:work') !== false);
             } else {
                 // Unix/Linux - check if exec is available
                 if (!function_exists('exec') || !$this->isShellFunctionEnabled('exec')) {
@@ -592,24 +662,30 @@ class ScheduleController extends Controller
      */
     private function startQueueWorkerIfNeeded(): bool
     {
-        if ($this->isQueueWorkerRunning()) {
-            Log::debug("Queue worker is already running, skipping startup.");
-            return false;
-        }
-        
-        $projectPath = base_path();
-        $logFile = storage_path('logs/queue-worker.log');
-        
+        // Wrap entire logic in try-catch to prevent controller crashes
         try {
+            if ($this->isQueueWorkerRunning()) {
+                Log::debug("Queue worker is already running, skipping startup.");
+                return false;
+            }
+            
+            $projectPath = base_path();
+            $logFile = storage_path('logs/queue-worker.log');
+            
             if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
-                // Windows: Use 'start' with /MIN to run minimized in background
+                // Windows: Use 'start /B' to run in background without new window
                 if (!function_exists('popen') || !$this->isShellFunctionEnabled('popen')) {
                     Log::info("popen disabled on this server. Queue worker must run via cron.");
                     return false;
                 }
-                $command = "cd /d \"{$projectPath}\" && start /MIN /B php artisan queue:work --queue=high,imports,default --tries=3 --timeout=120 >> \"{$logFile}\" 2>&1";
+                
+                $phpBinary = defined('PHP_BINARY') ? PHP_BINARY : 'php';
+                
+                // use start /B with a title "QueueWorker" to correctly handle quoted paths
+                $command = "cd /d \"{$projectPath}\" && start /B \"QueueWorker\" \"{$phpBinary}\" artisan queue:work --queue=high,imports,default --tries=3 --timeout=120 >> \"{$logFile}\" 2>&1";
+                
                 @pclose(@popen($command, 'r'));
-                Log::info("Started prioritized queue worker in background (Windows).");
+                Log::info("Started prioritized queue worker in background (Windows) using: $phpBinary");
             } else {
                 // Unix/Linux: Use nohup with proper background handling
                 if (!function_exists('exec') || !$this->isShellFunctionEnabled('exec')) {
@@ -625,7 +701,8 @@ class ScheduleController extends Controller
             usleep(100000); // 100ms
             
             return true;
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
+            // Catch ALL errors including fatal ones to prevent 500 responses
             Log::error("Failed to start queue worker: " . $e->getMessage());
             return false;
         }

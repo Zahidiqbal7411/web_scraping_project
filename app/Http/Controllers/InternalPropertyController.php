@@ -64,14 +64,20 @@ class InternalPropertyController extends Controller
             $query = \App\Models\Property::query();
             
         if ($searchId && $searchId !== 'null' && $searchId !== 'undefined') {
-            // Query properties through the pivot table for this specific search
-            $query->whereHas('savedSearches', function($q) use ($searchId) {
-                $q->where('saved_searches.id', $searchId);
-            });
-            Log::info("Filtering query by saved_search_id: {$searchId}");
-        } else {
-            Log::info("No search filter applied (showing all properties)");
-        }
+        // DEBUG: Check pivot table count for this search
+        $pivotCount = \DB::table('property_saved_search')
+            ->where('saved_search_id', $searchId)
+            ->count();
+        Log::info("DEBUG: Pivot table has {$pivotCount} entries for saved_search_id={$searchId}");
+        
+        // Query properties through the pivot table for this specific search
+        $query->whereHas('savedSearches', function($q) use ($searchId) {
+            $q->where('saved_searches.id', $searchId);
+        });
+        Log::info("Filtering query by saved_search_id: {$searchId}");
+    } else {
+        Log::info("No search filter applied (showing all properties)");
+    }
             
             // Get total count before pagination
             $totalCount = $query->count();

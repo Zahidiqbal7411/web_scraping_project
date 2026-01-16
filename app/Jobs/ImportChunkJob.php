@@ -47,35 +47,46 @@ class ImportChunkJob implements ShouldQueue
     // Store session ID instead of model for reliability on server
     protected int $importSessionId = 0;
     protected string $chunkUrl = '';
-    protected int $minPrice = 0;
-    protected int $maxPrice = 0;
+    protected int $startPage = 0;   // Page-based chunking (0-indexed)
+    protected int $endPage = 41;    // Page-based chunking (0-indexed, inclusive, max 41)
     protected int $estimatedCount = 0;
     protected ?int $savedSearchId = null;
     protected string $mode = 'full'; // 'full' or 'urls_only'
 
     /**
      * Create a new job instance.
+     * 
+     * Each job handles a RANGE of pages from the search URL
+     * This splits large imports into smaller chunks to avoid blocking
+     * 
+     * @param ImportSession $importSession
+     * @param string $chunkUrl The search URL to scrape
+     * @param int $startPage Start page (0-indexed)
+     * @param int $endPage End page (0-indexed, inclusive)
+     * @param int $estimatedCount Estimated properties for this chunk
+     * @param int|null $savedSearchId
+     * @param string $mode
      */
     public function __construct(
         ImportSession $importSession,
         string $chunkUrl,
-        int $minPrice,
-        int $maxPrice,
+        int $startPage,
+        int $endPage,
         int $estimatedCount,
         ?int $savedSearchId = null,
         string $mode = 'full'
     ) {
-        // Store ID instead of model for better reliability on cron-based systems
         $this->importSessionId = $importSession->id;
         $this->chunkUrl = $chunkUrl;
-        $this->minPrice = $minPrice;
-        $this->maxPrice = $maxPrice;
+        $this->startPage = $startPage;
+        $this->endPage = min($endPage, 41); // Cap at page 41 (Rightmove limit)
         $this->estimatedCount = $estimatedCount;
         $this->savedSearchId = $savedSearchId;
         $this->mode = $mode;
         
         $this->onQueue('imports');
     }
+
 
 
     /**
@@ -85,7 +96,7 @@ class ImportChunkJob implements ShouldQueue
         RightmoveScraperService $scraperService,
         InternalPropertyService $propertyService
     ): void {
-        $rangeLabel = "£" . number_format($this->minPrice) . " - £" . number_format($this->maxPrice);
+        $pageRangeLabel = "Pages {$this->startPage}-{$this->endPage}";
         
         // IMPORTANT: Fetch session fresh from database (not serialized)
         // This ensures progress updates work on server with cron-based queue
@@ -96,8 +107,9 @@ class ImportChunkJob implements ShouldQueue
             return;
         }
         
-        Log::info("=== CHUNK JOB: Processing {$rangeLabel} for session {$this->importSessionId} ===");
+        Log::info("=== CHUNK JOB: Processing {$pageRangeLabel} for session {$this->importSessionId} ===");
         Log::info("URL: {$this->chunkUrl}");
+        Log::info("Estimated count: {$this->estimatedCount}");
         
         // Check if session is cancelled
         if ($importSession->status === ImportSession::STATUS_CANCELLED) {
@@ -106,16 +118,16 @@ class ImportChunkJob implements ShouldQueue
         }
         
         try {
-            // Step 1: Scrape property URLs from search results
-            $urlsData = $scraperService->scrapePropertyUrls($this->chunkUrl);
+            // Step 1: Scrape property URLs from search results for THIS page range only
+            $urlsData = $scraperService->scrapePropertyUrls($this->chunkUrl, $this->startPage, $this->endPage);
             
             if (empty($urlsData)) {
-                Log::warning("No URLs scraped for range {$rangeLabel}");
+                Log::warning("No URLs scraped for {$pageRangeLabel}");
                 $importSession->incrementCompleted(0, 0);
                 return;
             }
             
-            Log::info("Scraped " . count($urlsData) . " property URLs");
+            Log::info("Scraped " . count($urlsData) . " property URLs from {$pageRangeLabel}");
             
             // Step 2: Save URLs to database
             $savedCount = 0;
@@ -132,6 +144,24 @@ class ImportChunkJob implements ShouldQueue
                 
                 // Check if URL already exists
                 $existing = Url::where('url', $propertyUrl)->first();
+                
+                // INCREMENTAL IMPORT: Check if this property is already linked to this search
+                if ($this->savedSearchId && $propertyId) {
+                    $alreadyLinked = DB::table('property_saved_search')
+                        ->where('saved_search_id', $this->savedSearchId)
+                        ->where('property_id', $propertyId)
+                        ->exists();
+                        
+                    if ($alreadyLinked) {
+                        // Log::info("Skipping existing property {$propertyId} for search {$this->savedSearchId}");
+                        $skippedCount++;
+                        $importSession->incrementCompleted(0, 1); // Increment jobs completed count (but 0 imported, 1 skipped)
+                        // Actually, incrementCompleted adds to "imported_properties" count on session usually.
+                        // We should probably just track skipped specifically if we want accurate stats, 
+                        // but for progress bar purposes we just need to ensure we don't block.
+                        continue;
+                    }
+                }
                 
                 if ($existing) {
                     $propertyIdFromDb = $urlData['id'] ?? null;
@@ -207,7 +237,7 @@ class ImportChunkJob implements ShouldQueue
                         Log::info("Dispatching ImportSoldJob for property {$property['id']}");
                         ImportSoldJob::dispatch($property['id'])
                             ->onQueue('imports')
-                            ->delay(now()->addSeconds(rand(5, 30)));
+                            ->delay(now()->addSeconds(rand(1, 3)));
                     }
                 }
             }
@@ -218,16 +248,16 @@ class ImportChunkJob implements ShouldQueue
             // Update session progress - fetch fresh to ensure we have latest data
             $importSession->incrementCompleted($savedCount, $skippedCount);
             
-            Log::info("=== CHUNK JOB COMPLETE: {$rangeLabel} ===");
+            Log::info("=== CHUNK JOB COMPLETE: {$pageRangeLabel} ===");
             
         } catch (\Exception $e) {
-            Log::error("Chunk job failed for {$rangeLabel}: " . $e->getMessage());
+            Log::error("Chunk job failed for {$pageRangeLabel}: " . $e->getMessage());
             Log::error($e->getTraceAsString());
             
             // Fetch session fresh for error handling
             $session = ImportSession::find($this->importSessionId);
             if ($session) {
-                $session->incrementFailed("Chunk {$rangeLabel}: " . $e->getMessage());
+                $session->incrementFailed("Chunk {$pageRangeLabel}: " . $e->getMessage());
             }
             throw $e;
         }
@@ -330,13 +360,13 @@ class ImportChunkJob implements ShouldQueue
      */
     public function failed(\Throwable $exception): void
     {
-        $rangeLabel = "£" . number_format($this->minPrice) . " - £" . number_format($this->maxPrice);
-        Log::error("ImportChunkJob failed permanently for {$rangeLabel}: " . $exception->getMessage());
+        $pageRangeLabel = "Pages {$this->startPage}-{$this->endPage}";
+        Log::error("ImportChunkJob failed permanently for {$pageRangeLabel}: " . $exception->getMessage());
         
         // Fetch session fresh from database for failure handling
         $session = ImportSession::find($this->importSessionId);
         if ($session) {
-            $session->incrementFailed("Chunk {$rangeLabel} failed: " . $exception->getMessage());
+            $session->incrementFailed("Chunk {$pageRangeLabel} failed: " . $exception->getMessage());
         }
     }
 

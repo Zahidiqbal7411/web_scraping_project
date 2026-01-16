@@ -226,7 +226,7 @@ class ImportSession extends Model
             return round(($currentCount / $this->total_properties) * 100, 1);
         }
 
-        if ($this->total_jobs === 0) {
+        if (empty($this->total_jobs) || $this->total_jobs <= 0) {
             return 0;
         }
 

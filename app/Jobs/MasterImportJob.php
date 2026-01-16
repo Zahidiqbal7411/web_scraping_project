@@ -80,6 +80,9 @@ class MasterImportJob implements ShouldQueue
         
         // CLEAR OLD ASSOCIATIONS for this search before starting a fresh import
         // This prevents property accumulation from old imports and fixes the count discrepancy (e.g. 96 vs 51)
+        /* 
+        // INCREMENTAL IMPORT - COMMENTED OUT DELETION
+        // We now keep existing associations to allow skipping already imported properties.
         if ($this->savedSearchId) {
             try {
                 Log::info("MASTER: Clearing old associations in pivot table for Search ID: {$this->savedSearchId}");
@@ -90,102 +93,170 @@ class MasterImportJob implements ShouldQueue
                 // Continue with import anyway
             }
         }
+        */
         
         try {
-            // Extract initial price range from URL (or use defaults)
-            [$currentMin, $currentMax] = $this->extractPriceRangeFromUrl($this->baseUrl);
-            $minPrice = $currentMin ?? 0;
-            $maxPrice = $currentMax ?? 15000000; // £15M max
+            // PAGE-BASED CHUNKING: Split into multiple jobs by page ranges
+            // Each job handles 10 pages (~240 properties) to avoid source website blocking
+            Log::info("=== PAGE-BASED IMPORT: Splitting by page ranges ===");
+            Log::info("URL: {$this->baseUrl}");
             
-            // ALWAYS use predefined UK property price bands for comprehensive coverage
-            // This bypasses the unreliable probeResultCount and ensures ALL properties are scraped
-            $priceBands = $this->getUKPriceBands($minPrice, $maxPrice);
-            
-            Log::info("=== FORCED PRICE SPLITTING: Using " . count($priceBands) . " price bands ===");
-            
-            $allChunks = [];
-            $splitStats = [
-                'total_splits' => count($priceBands),
-                'max_depth' => 0,
-                'split_details' => []
-            ];
-            
-            // Create chunks for each price band
-            foreach ($priceBands as $index => $band) {
-                $rangeUrl = $this->buildUrlWithPriceRange($this->baseUrl, $band['min'], $band['max']);
-                $rangeLabel = "£" . number_format($band['min']) . " - £" . number_format($band['max']);
-                
-                $allChunks[] = [
-                    'url' => $rangeUrl,
-                    'min_price' => $band['min'],
-                    'max_price' => $band['max'],
-                    'estimated_count' => 500, // Estimate per band
-                    'depth' => 0
-                ];
-                
-                $splitStats['split_details'][] = [
-                    'range' => $rangeLabel,
-                    'depth' => 0,
-                    'total_in_range' => 'Unknown',
-                    'capped' => false
-                ];
-                
-                Log::info("Band " . ($index + 1) . ": {$rangeLabel}");
-            }
-            
-            // Update session with split stats
-            $importSession->updateSplitStats(
-                $splitStats['total_splits'],
-                $splitStats['max_depth'],
-                $splitStats['split_details']
-            );
-            
-            // Get ACTUAL total count from source website instead of estimation
-            // This ensures the progress bar shows the correct number
-            // Use cache to avoid redundant probes during job retries
-            $probeUrl = $this->baseUrl;
-            // Do not force includeSSTC=true. Respect the user's URL.
-            // If the user wants STC, it will be in the URL.
-            /* 
-            if (strpos($probeUrl, 'includeSSTC=true') === false) {
-                $separator = (strpos($probeUrl, '?') === false) ? '?' : '&';
-                $probeUrl .= $separator . 'includeSSTC=true';
-            }
-            */
-
-            $cacheKey = 'import_total_' . md5($probeUrl);
-            $actualTotalCount = cache()->remember($cacheKey, 3600, function() use ($scraperService, $probeUrl) {
-                return $scraperService->probeResultCount($probeUrl);
-            });
+            // Get ACTUAL total count from source website (No caching, always get fresh count)
+            // $cacheKey = 'import_total_' . md5($this->baseUrl);
+            $actualTotalCount = $scraperService->probeResultCount($this->baseUrl);
             
             $importSession->setTotalProperties($actualTotalCount);
-            Log::info("=== MASTER: Actual total properties from source: {$actualTotalCount} ===");
+            Log::info("=== MASTER: Total properties from source: {$actualTotalCount} ===");
             
-            // Add jobs count to session
-            $importSession->addJobs(count($allChunks));
-            
-            Log::info("=== MASTER: Dispatching " . count($allChunks) . " chunk jobs ===");
-            
-            // Dispatch a chunk job for each price band with delays
-            foreach ($allChunks as $index => $chunk) {
-                $delay = $index * 30; // 30 seconds between each job (faster than before)
+            // PRICE PARTITIONING STRATEGY (For >1000 results)
+            if ($actualTotalCount > 1000) {
+                Log::info("=== MASTER: Large search detected (>1000). Attempting Price Partitioning. ===");
                 
-                ImportChunkJob::dispatch(
-                    $importSession,
-                    $chunk['url'],
-                    $chunk['min_price'],
-                    $chunk['max_price'],
-                    $chunk['estimated_count'],
-                    $this->savedSearchId,
-                    $this->mode
-                )->onQueue('imports')->delay(now()->addSeconds($delay));
+                $allChunks = [];
+                $useSimpleFallback = false;
                 
-                Log::info("Dispatched chunk job {$index} for range: £" . 
-                    number_format($chunk['min_price']) . " - £" . 
-                    number_format($chunk['max_price']) . " (delay: {$delay}s)");
+                try {
+                    $seenIds = [];
+                    $splitStats = ['total_splits' => 0, 'max_depth' => 0, 'split_details' => []];
+                    
+                    // Extract bounds from URL or default
+                    [$minPrice, $maxPrice] = $this->extractPriceRangeFromUrl($this->baseUrl);
+                    $minPrice = $minPrice ?? 0;
+                    $maxPrice = $maxPrice ?? 2000000;
+                    
+                    if ($maxPrice < 1000 && $this->baseUrl) { 
+                         // If max price is incredibly low/unset, default to high value
+                         Log::info("MasterImportJob: Max price detected as {$maxPrice}, defaulting to 50M");
+                         $maxPrice = 50000000;
+                    }
+                    if ($minPrice === 0 && $maxPrice === 2000000) {
+                         // Default range often implies no specific upper limit
+                         Log::info("MasterImportJob: Default range detected (0-2M), extending to 50M for partitioning");
+                         $maxPrice = 50000000; 
+                    }
+
+                    $this->collectChunks(
+                        $this->baseUrl,
+                        $minPrice,
+                        $maxPrice,
+                        1,
+                        5,
+                        $allChunks,
+                        $seenIds,
+                        $splitStats,
+                        $scraperService
+                    );
+                    
+                    Log::info("=== MASTER: Partitioning complete. Created " . count($allChunks) . " price-band chunks. ===");
+                    
+                } catch (\Exception $e) {
+                    Log::warning("=== MASTER: Price partitioning failed: " . $e->getMessage() . ". Using simple fallback. ===");
+                    $useSimpleFallback = true;
+                    $allChunks = [];
+                }
+                
+                // FALLBACK: If partitioning failed or produced no chunks, use simple 42-page approach
+                if ($useSimpleFallback || empty($allChunks)) {
+                    Log::info("=== MASTER: Using simple fallback - importing first 1000 properties only. ===");
+                    
+                    $totalPages = 42; // Max pages = ~1000 properties
+                    $numChunks = ceil($totalPages / 10);
+                    $importSession->addJobs($numChunks);
+                    
+                    for ($i = 0; $i < $numChunks; $i++) {
+                        $startPage = $i * 10;
+                        $endPage = min(($i + 1) * 10 - 1, $totalPages - 1);
+                        $estimatedInChunk = min(($endPage - $startPage + 1) * 24, 1000);
+                        
+                        ImportChunkJob::dispatch(
+                            $importSession,
+                            $this->baseUrl,
+                            $startPage,
+                            $endPage,
+                            $estimatedInChunk,
+                            $this->savedSearchId,
+                            $this->mode
+                        )->onQueue('imports')->delay(now()->addSeconds($i * 1));
+                    }
+                    
+                } else {
+                    // Partitioning succeeded - dispatch jobs for each price chunk
+                    $totalJobsToDispatch = 0;
+                    foreach ($allChunks as $chunkData) {
+                        $cTotal = $chunkData['estimated_count'];
+                        $cPages = min(42, ceil($cTotal / 24));
+                        $pagesPerJob = 10;
+                        $cJobs = ceil($cPages / $pagesPerJob);
+                        $totalJobsToDispatch += $cJobs;
+                    }
+                    
+                    $importSession->addJobs($totalJobsToDispatch);
+                    $globalJobIndex = 0;
+
+                    foreach ($allChunks as $chunkData) {
+                        $chunkUrl = $chunkData['url'];
+                        $cTotal = $chunkData['estimated_count'];
+                        
+                        $cPages = min(42, ceil($cTotal / 24));
+                        $cNumChunks = ceil($cPages / 10);
+                        
+                        for ($i = 0; $i < $cNumChunks; $i++) {
+                            $startPage = $i * 10;
+                            $endPage = min(($i + 1) * 10 - 1, $cPages - 1);
+                            $subEstimated = min(($endPage - $startPage + 1) * 24, $cTotal);
+                            
+                            $delay = $globalJobIndex * 1;
+                            
+                            ImportChunkJob::dispatch(
+                                $importSession,
+                                $chunkUrl,
+                                $startPage,
+                                $endPage,
+                                $subEstimated,
+                                $this->savedSearchId,
+                                $this->mode
+                            )->onQueue('imports')->delay(now()->addSeconds($delay));
+                            
+                            $globalJobIndex++;
+                        }
+                    }
+                }
+            } else {
+                // STANDARD IMPORT (<1000 results)
+                Log::info("=== MASTER: Standard import (<1000 properties). ===");
+                
+                // Calculate number of pages needed (24 properties per page)
+                $totalPages = min(42, ceil($actualTotalCount / 24)); // Max 42 pages (Rightmove limit)
+                $pagesPerChunk = 10; // Each job handles 10 pages (~240 properties)
+                $numChunks = ceil($totalPages / $pagesPerChunk);
+                
+                Log::info("=== MASTER: {$totalPages} pages, splitting into {$numChunks} chunk jobs ===");
+                
+                // Add jobs count to session
+                $importSession->addJobs($numChunks);
+                
+                // Dispatch page-based chunk jobs with delays
+                for ($chunk = 0; $chunk < $numChunks; $chunk++) {
+                    $startPage = $chunk * $pagesPerChunk;
+                    $endPage = min(($chunk + 1) * $pagesPerChunk - 1, $totalPages - 1);
+                    $estimatedInChunk = min(($endPage - $startPage + 1) * 24, $actualTotalCount);
+                    $delay = $chunk * 2; // 2 seconds between each job
+                    
+                    ImportChunkJob::dispatch(
+                        $importSession,
+                        $this->baseUrl,
+                        $startPage,
+                        $endPage,
+                        $estimatedInChunk,
+                        $this->savedSearchId,
+                        $this->mode
+                    )->onQueue('imports')->delay(now()->addSeconds($delay));
+                    
+                    Log::info("Dispatched chunk job {$chunk}: pages {$startPage}-{$endPage} (~{$estimatedInChunk} properties, delay: {$delay}s)");
+                }
             }
             
-            Log::info("=== MASTER IMPORT JOB: Completed dispatching for session {$this->importSessionId} ===");
+            Log::info("=== MASTER IMPORT JOB: Completed - dispatched {$numChunks} chunk jobs for session {$this->importSessionId} ===");
             
         } catch (\Exception $e) {
             Log::error("Master import job failed: " . $e->getMessage());
@@ -198,6 +269,7 @@ class MasterImportJob implements ShouldQueue
             }
             throw $e;
         }
+
     }
 
     /**
@@ -229,6 +301,13 @@ class MasterImportJob implements ShouldQueue
         
         // Probe to get total results for this range
         $totalResults = $scraperService->probeResultCount($rangeUrl);
+        
+        // CRITICAL FIX: If probe returns 0, it might be a network error, not actually 0 results
+        // Treat as potentially valid range with unknown count
+        if ($totalResults === 0 && $depth === 1) {
+            Log::warning("{$indent}[Depth {$depth}] Probe returned 0 for range {$rangeLabel}. Treating as potentially valid range.");
+            $totalResults = 500; // Assume moderate count to allow further splitting if needed
+        }
         
         Log::info("{$indent}[Depth {$depth}] Range {$rangeLabel}: {$totalResults} results");
         

@@ -208,9 +208,9 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     while (!isDone) {
         try {
-            // Use AbortController for request timeout (30 seconds should be plenty now)
+            // Use AbortController for request timeout (60 seconds to be safe during worker startup)
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 30000);
+            const timeoutId = setTimeout(() => controller.abort(), 60000);
 
             const response = await fetch('/schedules/process', {
                 method: 'POST',
@@ -285,7 +285,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             
             log(errorMsg, 'warning');
             
-            if (errorCount > 30) { // Allow more retries since requests are faster now
+            if (errorCount > 600) { // Allow significantly more retries for large recursions (up to ~20 mins)
                 statusTitle.textContent = '❌ Connection Lost';
                 statusMessage.textContent = 'Unable to reach the server. Please check your connection.';
                 log('MAX RETRIES EXCEEDED: Connection aborted. Please refresh the page.', 'error');

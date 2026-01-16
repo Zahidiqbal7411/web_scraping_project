@@ -165,6 +165,45 @@ Route::middleware('auth')->group(function () {
         }
     });
 
+    // DEBUG: Check pivot table and saved search property counts
+    Route::get('/pivot-debug', function() {
+        $report = [];
+        $report[] = "<h2>Pivot Table Debug Report</h2>";
+        
+        try {
+            // Get all saved searches with their property counts
+            $searches = \App\Models\SavedSearch::withCount('properties')->get();
+            
+            $report[] = "<h3>Saved Searches & Property Counts:</h3>";
+            $report[] = "<table border='1' style='border-collapse: collapse;'>";
+            $report[] = "<tr><th>ID</th><th>Area</th><th>Properties Count</th><th>Test Link</th></tr>";
+            
+            foreach ($searches as $search) {
+                $link = "/internal-properties/search/{$search->id}";
+                $report[] = "<tr>";
+                $report[] = "<td>{$search->id}</td>";
+                $report[] = "<td>{$search->area}</td>";
+                $report[] = "<td><strong>{$search->properties_count}</strong></td>";
+                $report[] = "<td><a href='{$link}'>View Properties</a></td>";
+                $report[] = "</tr>";
+            }
+            $report[] = "</table>";
+            
+            // Total properties in DB
+            $totalProps = \App\Models\Property::count();
+            $report[] = "<p>Total Properties in Database: <strong>{$totalProps}</strong></p>";
+            
+            // Pivot table summary
+            $pivotCount = \DB::table('property_saved_search')->count();
+            $report[] = "<p>Total Pivot Table Entries: <strong>{$pivotCount}</strong></p>";
+            
+        } catch (\Exception $e) {
+            $report[] = "<p style='color:red'>Error: " . $e->getMessage() . "</p>";
+        }
+        
+        return implode("\n", $report);
+    });
+
     // TEMPORARY: Queue Diagnostic - check why jobs aren't processing
     Route::get('/queue-debug', function() {
         $report = [];
