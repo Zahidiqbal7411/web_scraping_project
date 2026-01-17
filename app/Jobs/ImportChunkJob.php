@@ -84,7 +84,8 @@ class ImportChunkJob implements ShouldQueue
         $this->savedSearchId = $savedSearchId;
         $this->mode = $mode;
         
-        $this->onQueue('imports');
+        // Removed custom queue to ensure default worker picks it up
+        // $this->onQueue('imports');
     }
 
 
@@ -234,10 +235,8 @@ class ImportChunkJob implements ShouldQueue
                 // Step 5: Automatically trigger sold data import for these properties
                 foreach ($results['properties'] ?? [] as $property) {
                     if (!empty($property['sold_link'])) {
-                        Log::info("Dispatching ImportSoldJob for property {$property['id']}");
-                        ImportSoldJob::dispatch($property['id'])
-                            ->onQueue('imports')
-                            ->delay(now()->addSeconds(rand(1, 3)));
+                        Log::info("Dispatching ImportSoldJob SYNCHRONOUSLY for property {$property['id']}");
+                        ImportSoldJob::dispatchSync($property['id']);
                     }
                 }
             }
@@ -286,9 +285,10 @@ class ImportChunkJob implements ShouldQueue
                 ->exists();
         }
 
-        // If already exists AND already linked to this search, this is a TRUE duplicate
-        if ($existsBefore && $alreadyLinkedToThisSearch) {
-            Log::debug("Property {$propertyId} already exists and is linked to search {$this->savedSearchId} - skipping");
+        // If already linked to this search, this is a TRUE duplicate for this import session
+        // (e.g. property appears in two overlapping price chunks)
+        if ($alreadyLinkedToThisSearch) {
+            // Log::debug("Property {$propertyId} already linked to search {$this->savedSearchId} - skipping duplicate");
             return false;
         }
 

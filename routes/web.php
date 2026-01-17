@@ -60,6 +60,7 @@ Route::middleware('auth')->group(function () {
         Route::post('/{id}/start-queued', [ScheduleController::class, 'startQueuedImport'])->name('start-queued');
         Route::get('/status', [ScheduleController::class, 'getStatus'])->name('status');
         Route::post('/process', [ScheduleController::class, 'processChunk'])->name('process');
+        Route::get('/test-scrape', [ScheduleController::class, 'testScrape'])->name('test-scrape');
     });
 
     // TEMPORARY: Debug Route to diagnose 500 Error

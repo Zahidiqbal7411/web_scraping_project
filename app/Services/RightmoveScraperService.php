@@ -131,28 +131,101 @@ class RightmoveScraperService
      */
     public function probeResultCount(string $searchUrl): int
     {
+        // CRITICAL: Normalize URL - decode %5E to ^ for Rightmove's locationIdentifier
+        $searchUrl = str_replace(['%5E', '%5e'], '^', $searchUrl);
+        
+        Log::info("=== PROBE: Starting probe for URL: {$searchUrl} ===");
+        
         try {
             $response = Http::withHeaders([
                 'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language' => 'en-US,en;q=0.9',
-            ])->timeout(30)->get($searchUrl);
+                'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language' => 'en-GB,en-US;q=0.9,en;q=0.8',
+                'Accept-Encoding' => 'gzip, deflate, br',
+                'Cache-Control' => 'no-cache',
+                'Pragma' => 'no-cache',
+                'Sec-Ch-Ua' => '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                'Sec-Ch-Ua-Mobile' => '?0',
+                'Sec-Ch-Ua-Platform' => '"Windows"',
+                'Sec-Fetch-Dest' => 'document',
+                'Sec-Fetch-Mode' => 'navigate',
+                'Sec-Fetch-Site' => 'none',
+                'Sec-Fetch-User' => '?1',
+                'Upgrade-Insecure-Requests' => '1',
+            ])->timeout(30)->withOptions(['verify' => false])->get($searchUrl);
 
+            // Log HTTP status
+            Log::info("PROBE: HTTP Status: " . $response->status());
+            
             if ($response->failed()) {
-                Log::warning("Failed to probe URL: {$searchUrl} - Status: " . $response->status());
+                Log::error("PROBE FAILED: HTTP {$response->status()} for URL: {$searchUrl}");
                 return 0;
             }
 
             $html = $response->body();
+            $htmlLen = strlen($html);
+            
+            // DEBUG: Log response size to detect empty/blocked responses
+            Log::info("PROBE: Response size: {$htmlLen} bytes");
+            
+            // Check for blocking indicators
+            $blockingIndicators = [
+                'captcha' => stripos($html, 'captcha') !== false,
+                'challenge' => stripos($html, 'challenge') !== false,
+                'blocked' => stripos($html, 'access denied') !== false || stripos($html, 'blocked') !== false,
+                'cloudflare' => stripos($html, 'cloudflare') !== false,
+                'bot_detection' => stripos($html, 'bot') !== false && stripos($html, 'robot') !== false,
+                'rate_limit' => stripos($html, 'rate limit') !== false || stripos($html, 'too many requests') !== false,
+            ];
+            
+            $isBlocked = false;
+            foreach ($blockingIndicators as $indicator => $found) {
+                if ($found) {
+                    Log::warning("PROBE: BLOCKING DETECTED - {$indicator} found in response!");
+                    $isBlocked = true;
+                }
+            }
+            
+            // If response is very small or blocked, log HTML sample for debugging
+            if ($htmlLen < 5000 || $isBlocked) {
+                $sample = substr($html, 0, 2000);
+                Log::warning("PROBE: Small/blocked response. HTML sample: " . $sample);
+            }
+            
+            // Check for PAGE_MODEL presence
+            $hasPageModel = strpos($html, 'PAGE_MODEL') !== false;
+            Log::info("PROBE: PAGE_MODEL present: " . ($hasPageModel ? 'YES' : 'NO'));
 
             // Try to extract total from PAGE_MODEL JSON
             if (preg_match('/window\.PAGE_MODEL\s*=\s*(\{.*?\});/s', $html, $matches)) {
                 $json = json_decode($matches[1], true);
-                if ($json && isset($json['pagination']['total'])) {
-                    return (int) $json['pagination']['total'];
-                }
-                if ($json && isset($json['resultCount'])) {
-                    return (int) str_replace(',', '', $json['resultCount']);
+                
+                if ($json) {
+                    // Log available keys for debugging
+                    $topKeys = array_keys($json);
+                    Log::info("PROBE: PAGE_MODEL top-level keys: " . implode(', ', $topKeys));
+                    
+                    if (isset($json['pagination']['total'])) {
+                        $count = (int) $json['pagination']['total'];
+                        Log::info("PROBE SUCCESS: Found {$count} properties via pagination.total");
+                        return $count;
+                    }
+                    if (isset($json['resultCount'])) {
+                        $count = (int) str_replace(',', '', $json['resultCount']);
+                        Log::info("PROBE SUCCESS: Found {$count} properties via resultCount");
+                        return $count;
+                    }
+                    
+                    // Try alternate paths
+                    if (isset($json['searchResult']['pagination']['total'])) {
+                        $count = (int) $json['searchResult']['pagination']['total'];
+                        Log::info("PROBE SUCCESS: Found {$count} properties via searchResult.pagination.total");
+                        return $count;
+                    }
+                    
+                    Log::warning("PROBE: PAGE_MODEL found but no result count in expected locations");
+                } else {
+                    Log::warning("PROBE: PAGE_MODEL regex matched but JSON decode failed");
                 }
             }
 
@@ -161,25 +234,27 @@ class RightmoveScraperService
                 '/(\d{1,3}(?:,\d{3})*)\s*(?:properties|results)\s*for sale/i',
                 '/(\d{1,3}(?:,\d{3})*)\s*(?:properties|results)/i',
                 '/<span>(\d{1,3}(?:,\d{3})*)<\/span>\s*(?:properties|results)/i',
-                '/"resultCount"\s*:\s*"?(\d+)"?/'
+                '/"resultCount"\s*:\s*"?(\d+)"?/',
+                '/"total"\s*:\s*(\d+)/',
             ];
 
             foreach ($patterns as $pattern) {
                 if (preg_match($pattern, $html, $matches)) {
                     $val = str_replace(',', '', $matches[1]);
                     if (is_numeric($val) && $val > 0) {
+                        Log::info("PROBE SUCCESS (fallback): Found {$val} properties via regex pattern");
                         return (int) $val;
                     }
                 }
             }
 
-            Log::warning("Could not extract result count from HTML: {$searchUrl}");
-            // Return a small default number to allow the import to proceed in fallback mode if probing fails but page handles ok
-            // return 0; 
+            Log::warning("PROBE FAILED: Could not extract result count from HTML. URL: {$searchUrl}");
+            Log::warning("PROBE: Response had PAGE_MODEL: " . ($hasPageModel ? 'yes' : 'no') . ", Size: {$htmlLen} bytes");
             return 0;
 
         } catch (\Exception $e) {
-            Log::error("Error probing result count for {$searchUrl}: " . $e->getMessage());
+            Log::error("PROBE EXCEPTION: " . $e->getMessage());
+            Log::error($e->getTraceAsString());
             return 0;
         }
     }
@@ -195,6 +270,9 @@ class RightmoveScraperService
      */
     public function scrapePropertyUrls(string $searchUrl, int $startPage = 0, int $endPage = 41): array
     {
+        // CRITICAL: Normalize URL - decode %5E to ^ for Rightmove's locationIdentifier
+        $searchUrl = str_replace(['%5E', '%5e'], '^', $searchUrl);
+        
         $allUrls = [];
         $seenIds = [];
         $currentPage = $startPage;
@@ -215,23 +293,41 @@ class RightmoveScraperService
                 
                 $queryParams['index'] = $index;
                 $newQuery = http_build_query($queryParams);
-                $newQuery = str_replace('%2C', ',', $newQuery); // Rightmove likes literal commas
+                // CRITICAL: Rightmove requires literal ^ and , in URLs (not encoded)
+                $newQuery = str_replace(['%2C', '%5E', '%5e'], [',', '^', '^'], $newQuery);
                 
                 $pageUrl = ($parts['scheme'] ?? 'https') . '://' . ($parts['host'] ?? 'www.rightmove.co.uk') . ($parts['path'] ?? '/property-for-sale/find.html') . '?' . $newQuery;
                 
-                Log::info("Scraping property URLs from: {$pageUrl}");
+                Log::info("=== SCRAPE: Page {$currentPage}, URL: {$pageUrl} ===");
                 $html = $this->fetchWithRetry($pageUrl);
                 
+                $htmlLen = strlen($html);
+                Log::info("SCRAPE: Response size: {$htmlLen} bytes");
+                
                 if (empty($html)) {
-                    Log::warning("Page {$currentPage} (index {$index}) returned empty HTML. Stopping pagination.");
+                    Log::warning("SCRAPE: Page {$currentPage} (index {$index}) returned empty HTML. Stopping pagination.");
                     break;
+                }
+                
+                // Check for blocking on search pages too
+                if ($htmlLen < 5000) {
+                    $sample = substr($html, 0, 1500);
+                    Log::warning("SCRAPE: Small response detected. HTML sample: " . $sample);
+                    
+                    // Check for common blocking patterns
+                    if (stripos($html, 'captcha') !== false || stripos($html, 'challenge') !== false) {
+                        Log::error("SCRAPE: CAPTCHA/Challenge detected! Rightmove is blocking requests.");
+                    }
                 }
 
                 $foundOnPage = 0;
                 $json = $this->parseJsonData($html);
                 
                 if ($json) {
-                    Log::info("JSON PAGE_MODEL found on page {$currentPage}");
+                    // Log top-level keys for debugging
+                    $topKeys = array_keys($json);
+                    Log::info("SCRAPE: PAGE_MODEL found on page {$currentPage}. Top-level keys: " . implode(', ', $topKeys));
+                    
                     // Try multiple paths for properties - Rightmove structure can vary
                     $properties = [];
                     
@@ -256,20 +352,33 @@ class RightmoveScraperService
                         }
                         if (is_array($current) && !empty($current)) {
                             $properties = $current;
-                            Log::info("Found properties in: " . implode('.', $path));
+                            Log::info("SCRAPE: Found " . count($properties) . " properties in: " . implode('.', $path));
                             break;
                         }
                     }
                     
                     // If properties still empty, try to find any 'properties' key deep
                     if (empty($properties)) {
+                        Log::warning("SCRAPE: No properties found in standard paths. Trying deep search...");
                         $it = new \RecursiveIteratorIterator(new \RecursiveArrayIterator($json));
                         foreach ($it as $key => $value) {
                             if ($key === 'properties' && is_array($value)) {
                                 $properties = $value;
-                                Log::info("Found properties in deep key: properties");
+                                Log::info("SCRAPE: Found " . count($properties) . " properties in deep key: properties");
                                 break;
                             }
+                        }
+                    }
+                    
+                    // If still empty, log what we have for debugging
+                    if (empty($properties)) {
+                        Log::warning("SCRAPE: PAGE_MODEL exists but NO PROPERTIES FOUND! This is likely a data structure issue.");
+                        // Log some keys that might help debug
+                        if (isset($json['resultCount'])) {
+                            Log::info("SCRAPE: resultCount in JSON: " . $json['resultCount']);
+                        }
+                        if (isset($json['pagination'])) {
+                            Log::info("SCRAPE: pagination exists: " . json_encode($json['pagination']));
                         }
                     }
 
@@ -305,22 +414,45 @@ class RightmoveScraperService
                     }
                 }
 
-                // Fallback: extract from HTML links
+                // Fallback: extract from HTML links using multiple patterns
                 if ($foundOnPage === 0) {
-                    preg_match_all('/href="(\/properties\/(\d+)[^"]*)"/', $html, $linkMatches);
+                    Log::info("SCRAPE: PAGE_MODEL extraction failed, trying HTML link fallback...");
                     
-                    if (!empty($linkMatches[2])) {
-                        foreach ($linkMatches[2] as $index => $propId) {
-                            if (!in_array($propId, $seenIds)) {
-                                $seenIds[] = $propId;
-                                $allUrls[] = [
-                                    'id' => $propId,
-                                    'url' => 'https://www.rightmove.co.uk' . $linkMatches[1][$index],
-                                ];
-                                $foundOnPage++;
-                            }
+                    // Pattern 1: Standard property links
+                    preg_match_all('/href="\/properties\/(\d+)[^"]*"/', $html, $matches1);
+                    
+                    // Pattern 2: Property links with full URL
+                    preg_match_all('/href="https:\/\/www\.rightmove\.co\.uk\/properties\/(\d+)[^"]*"/', $html, $matches2);
+                    
+                    // Pattern 3: Property IDs from data attributes
+                    preg_match_all('/propertyId["\':]+\s*["\']?(\d{6,12})["\']?/', $html, $matches3);
+                    
+                    // Pattern 4: Property links in JSON-like structures
+                    preg_match_all('/"id"\s*:\s*(\d{6,12})/', $html, $matches4);
+                    
+                    // Combine all matches
+                    $allPropIds = array_merge(
+                        $matches1[1] ?? [],
+                        $matches2[1] ?? [],
+                        $matches3[1] ?? [],
+                        $matches4[1] ?? []
+                    );
+                    $allPropIds = array_unique($allPropIds);
+                    
+                    Log::info("SCRAPE: Fallback found " . count($allPropIds) . " property IDs via regex");
+                    
+                    foreach ($allPropIds as $propId) {
+                        if (!in_array($propId, $seenIds) && strlen($propId) >= 6) {
+                            $seenIds[] = $propId;
+                            $allUrls[] = [
+                                'id' => $propId,
+                                'url' => 'https://www.rightmove.co.uk/properties/' . $propId,
+                            ];
+                            $foundOnPage++;
                         }
                     }
+                    
+                    Log::info("SCRAPE: Fallback extracted {$foundOnPage} new properties");
                 }
 
                 Log::info("Page {$currentPage}: Found {$foundOnPage} new properties (total: " . count($allUrls) . ")");

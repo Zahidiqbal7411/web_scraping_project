@@ -63,6 +63,9 @@ class MasterImportJob implements ShouldQueue
      */
     public function handle(RightmoveScraperService $scraperService): void
     {
+        // DEBUG: Log that we actually entered the handle method
+        Log::emergency("=== MASTER JOB HANDLE() CALLED: Session ID {$this->importSessionId} ===");
+        
         // IMPORTANT: Fetch session fresh from database (not serialized)
         // This ensures progress updates work on server with cron-based queue
         $importSession = ImportSession::find($this->importSessionId);
@@ -72,8 +75,8 @@ class MasterImportJob implements ShouldQueue
             return;
         }
         
-        Log::info("=== MASTER IMPORT JOB: Starting for session {$this->importSessionId} ===");
-        Log::info("URL: {$this->baseUrl}");
+        Log::emergency("=== MASTER IMPORT JOB: Starting for session {$this->importSessionId} ===");
+        Log::emergency("URL: {$this->baseUrl}");
         
         // Mark session as processing
         $importSession->start();
@@ -105,54 +108,77 @@ class MasterImportJob implements ShouldQueue
             // $cacheKey = 'import_total_' . md5($this->baseUrl);
             $actualTotalCount = $scraperService->probeResultCount($this->baseUrl);
             
+            // CRITICAL FIX: If probe returns 0, it might be a network/parsing error, not actually 0 properties
+            // Use a fallback estimate to allow import to proceed
+            if ($actualTotalCount === 0) {
+                Log::warning("=== MASTER: Initial probe returned 0. Assuming LARGE dataset (blocking detected). Defaulting to 50,000. ===");
+                // Default to HIGH number to force Static Price Band strategy (safest when blocked)
+                $actualTotalCount = 50000; 
+            }
+            
             $importSession->setTotalProperties($actualTotalCount);
             Log::info("=== MASTER: Total properties from source: {$actualTotalCount} ===");
             
             // PRICE PARTITIONING STRATEGY (For >1000 results)
+            $totalDispatched = 0; // Track total jobs dispatched across all paths
+            
             if ($actualTotalCount > 1000) {
-                Log::info("=== MASTER: Large search detected (>1000). Attempting Price Partitioning. ===");
+                Log::info("=== MASTER: Large search detected (>1000). Property count: {$actualTotalCount} ===");
                 
                 $allChunks = [];
                 $useSimpleFallback = false;
                 
-                try {
-                    $seenIds = [];
-                    $splitStats = ['total_splits' => 0, 'max_depth' => 0, 'split_details' => []];
-                    
-                    // Extract bounds from URL or default
-                    [$minPrice, $maxPrice] = $this->extractPriceRangeFromUrl($this->baseUrl);
-                    $minPrice = $minPrice ?? 0;
-                    $maxPrice = $maxPrice ?? 2000000;
-                    
-                    if ($maxPrice < 1000 && $this->baseUrl) { 
-                         // If max price is incredibly low/unset, default to high value
-                         Log::info("MasterImportJob: Max price detected as {$maxPrice}, defaulting to 50M");
-                         $maxPrice = 50000000;
-                    }
-                    if ($minPrice === 0 && $maxPrice === 2000000) {
-                         // Default range often implies no specific upper limit
-                         Log::info("MasterImportJob: Default range detected (0-2M), extending to 50M for partitioning");
-                         $maxPrice = 50000000; 
-                    }
+                // MEDIUM-LARGE IMPORTS (1000+): Use recursive probing with delays
+                // We split strategy based on size:
+                // <= 2000: use Recursion (accurate, fast enough)
+                // > 2000: use Static Bands (safer, avoids deep recursion timeout)
+                
+                if ($actualTotalCount <= 2000) {
+                     // RECURSIVE STRATEGY
+                    try {
+                        $seenIds = [];
+                        $splitStats = ['total_splits' => 0, 'max_depth' => 0, 'split_details' => []];
+                        
+                        // Extract bounds from URL or default
+                        [$minPrice, $maxPrice] = $this->extractPriceRangeFromUrl($this->baseUrl);
+                        $minPrice = $minPrice ?? 0;
+                        $maxPrice = $maxPrice ?? 2000000;
+                        
+                        if ($maxPrice < 1000 && $this->baseUrl) { 
+                             // If max price is incredibly low/unset, default to high value
+                             Log::info("MasterImportJob: Max price detected as {$maxPrice}, defaulting to 50M");
+                             $maxPrice = 50000000;
+                        }
+                        if ($minPrice === 0 && $maxPrice === 2000000) {
+                             // Default range often implies no specific upper limit
+                             Log::info("MasterImportJob: Default range detected (0-2M), extending to 50M for partitioning");
+                             $maxPrice = 50000000; 
+                        }
 
-                    $this->collectChunks(
-                        $this->baseUrl,
-                        $minPrice,
-                        $maxPrice,
-                        1,
-                        5,
-                        $allChunks,
-                        $seenIds,
-                        $splitStats,
-                        $scraperService
-                    );
-                    
-                    Log::info("=== MASTER: Partitioning complete. Created " . count($allChunks) . " price-band chunks. ===");
-                    
-                } catch (\Exception $e) {
-                    Log::warning("=== MASTER: Price partitioning failed: " . $e->getMessage() . ". Using simple fallback. ===");
-                    $useSimpleFallback = true;
-                    $allChunks = [];
+                        // Increase max depth to 10 to ensure we can split dense price ranges enough
+                        $this->collectChunks(
+                            $this->baseUrl,
+                            $minPrice,
+                            $maxPrice,
+                            1,
+                            10, // Max Depth
+                            $allChunks,
+                            $seenIds,
+                            $splitStats,
+                            $scraperService
+                        );
+                        
+                        Log::info("=== MASTER: Partitioning complete. Created " . count($allChunks) . " price-band chunks. ===");
+                        
+                    } catch (\Exception $e) {
+                        Log::warning("=== MASTER: Price partitioning failed: " . $e->getMessage() . ". Using simple fallback. ===");
+                        $useSimpleFallback = true;
+                        $allChunks = [];
+                    }
+                } else {
+                    // STATIC BAND STRATEGY needed for very large imports to avoid Rate Limiting/Timeouts
+                    Log::info("=== MASTER: Very large import (>2000). Using STATIC PRICE BANDS to ensure stability. ===");
+                    $allChunks = $this->getStaticPriceBandChunks($this->baseUrl);
                 }
                 
                 // FALLBACK: If partitioning failed or produced no chunks, use simple 42-page approach
@@ -162,25 +188,28 @@ class MasterImportJob implements ShouldQueue
                     $totalPages = 42; // Max pages = ~1000 properties
                     $numChunks = ceil($totalPages / 10);
                     $importSession->addJobs($numChunks);
+                    $totalDispatched = $numChunks; // Track dispatched jobs
                     
                     for ($i = 0; $i < $numChunks; $i++) {
                         $startPage = $i * 10;
                         $endPage = min(($i + 1) * 10 - 1, $totalPages - 1);
                         $estimatedInChunk = min(($endPage - $startPage + 1) * 24, 1000);
                         
-                        ImportChunkJob::dispatch(
-                            $importSession,
-                            $this->baseUrl,
-                            $startPage,
-                            $endPage,
-                            $estimatedInChunk,
-                            $this->savedSearchId,
-                            $this->mode
-                        )->onQueue('imports')->delay(now()->addSeconds($i * 1));
+                        // Store job parameters for later execution
+                        $pendingChunks[] = [
+                            'url' => $this->baseUrl,
+                            'start_page' => $startPage,
+                            'end_page' => $endPage,
+                            'estimated' => $estimatedInChunk,
+                            'saved_search_id' => $this->savedSearchId,
+                            'mode' => $this->mode
+                        ];
                     }
                     
                 } else {
                     // Partitioning succeeded - dispatch jobs for each price chunk
+                    Log::emergency("=== MASTER: Starting job dispatch for " . count($allChunks) . " chunks ===");
+                    
                     $totalJobsToDispatch = 0;
                     foreach ($allChunks as $chunkData) {
                         $cTotal = $chunkData['estimated_count'];
@@ -190,7 +219,10 @@ class MasterImportJob implements ShouldQueue
                         $totalJobsToDispatch += $cJobs;
                     }
                     
+                    Log::emergency("=== MASTER: Will dispatch {$totalJobsToDispatch} total jobs ===");
+                    
                     $importSession->addJobs($totalJobsToDispatch);
+                    $totalDispatched = $totalJobsToDispatch; // Track dispatched jobs
                     $globalJobIndex = 0;
 
                     foreach ($allChunks as $chunkData) {
@@ -207,15 +239,15 @@ class MasterImportJob implements ShouldQueue
                             
                             $delay = $globalJobIndex * 1;
                             
-                            ImportChunkJob::dispatch(
-                                $importSession,
-                                $chunkUrl,
-                                $startPage,
-                                $endPage,
-                                $subEstimated,
-                                $this->savedSearchId,
-                                $this->mode
-                            )->onQueue('imports')->delay(now()->addSeconds($delay));
+                            // Store job parameters for later execution
+                            $pendingChunks[] = [
+                                'url' => $chunkUrl,
+                                'start_page' => $startPage,
+                                'end_page' => $endPage,
+                                'estimated' => $subEstimated,
+                                'saved_search_id' => $this->savedSearchId,
+                                'mode' => $this->mode
+                            ];
                             
                             $globalJobIndex++;
                         }
@@ -234,6 +266,7 @@ class MasterImportJob implements ShouldQueue
                 
                 // Add jobs count to session
                 $importSession->addJobs($numChunks);
+                $totalDispatched = $numChunks; // Track dispatched jobs
                 
                 // Dispatch page-based chunk jobs with delays
                 for ($chunk = 0; $chunk < $numChunks; $chunk++) {
@@ -242,21 +275,47 @@ class MasterImportJob implements ShouldQueue
                     $estimatedInChunk = min(($endPage - $startPage + 1) * 24, $actualTotalCount);
                     $delay = $chunk * 2; // 2 seconds between each job
                     
-                    ImportChunkJob::dispatch(
-                        $importSession,
-                        $this->baseUrl,
-                        $startPage,
-                        $endPage,
-                        $estimatedInChunk,
-                        $this->savedSearchId,
-                        $this->mode
-                    )->onQueue('imports')->delay(now()->addSeconds($delay));
+                    // Store job parameters for later execution
+                    $pendingChunks[] = [
+                        'url' => $this->baseUrl,
+                        'start_page' => $startPage,
+                        'end_page' => $endPage,
+                        'estimated' => $estimatedInChunk,
+                        'saved_search_id' => $this->savedSearchId,
+                        'mode' => $this->mode
+                    ];
                     
-                    Log::info("Dispatched chunk job {$chunk}: pages {$startPage}-{$endPage} (~{$estimatedInChunk} properties, delay: {$delay}s)");
+                    Log::info("Planned chunk job {$chunk}: pages {$startPage}-{$endPage} (~{$estimatedInChunk} properties)");
                 }
             }
             
-            Log::info("=== MASTER IMPORT JOB: Completed - dispatched {$numChunks} chunk jobs for session {$this->importSessionId} ===");
+            // SAVE PLANNED CHUNKS TO SESSION & DISPATCH TO QUEUE
+            $totalJobs = count($pendingChunks);
+            Log::emergency("=== MASTER IMPORT JOB: Planning Complete - {$totalJobs} chunks generated ===");
+            
+            if ($totalJobs > 0) {
+                // Initialize session job count explicitly
+                $importSession->update(['total_jobs' => $totalJobs]);
+                
+                Log::emergency("=== MASTER: Dispatching {$totalJobs} jobs to BACKGROUND QUEUE ===");
+                
+                foreach ($pendingChunks as $jobData) {
+                    \App\Jobs\ImportChunkJob::dispatch(
+                        $importSession,
+                        $jobData['url'],
+                        $jobData['start_page'],
+                        $jobData['end_page'],
+                        $jobData['estimated'],
+                        $jobData['saved_search_id'],
+                        $jobData['mode']
+                    );
+                }
+                
+                Log::emergency("=== MASTER: Dispatched all jobs to queue. ===");
+            } else {
+                Log::warning("=== MASTER: No chunks generated. Marking complete. ===");
+                $importSession->markCompleted();
+            }
             
         } catch (\Exception $e) {
             Log::error("Master import job failed: " . $e->getMessage());
@@ -301,6 +360,9 @@ class MasterImportJob implements ShouldQueue
         
         // Probe to get total results for this range
         $totalResults = $scraperService->probeResultCount($rangeUrl);
+        
+        // Rate limiting protection: delay between probes to avoid Rightmove blocking
+        usleep(500000); // 0.5 second delay
         
         // CRITICAL FIX: If probe returns 0, it might be a network error, not actually 0 results
         // Treat as potentially valid range with unknown count
@@ -395,72 +457,84 @@ class MasterImportJob implements ShouldQueue
     }
 
     /**
-     * Extract price range from URL
+     * Get static price band chunks for VERY LARGE imports (>5000 properties)
+     * Uses predefined price bands without probing to avoid timeout/rate limiting
+     * Each chunk will process up to 1000 properties (42 pages max per band)
      */
-    protected function extractPriceRangeFromUrl(string $url): array
+    protected function getStaticPriceBandChunks(string $baseUrl): array
     {
-        $minPrice = null;
-        $maxPrice = null;
+        // Extract bounds from the user's search URL so we don't scan irrelevant prices
+        [$urlMin, $urlMax] = $this->extractPriceRangeFromUrl($baseUrl);
+        $minPrice = $urlMin ?? 0;
+        $maxPrice = $urlMax ?? 50000000; // Default to 50M if no max set
         
-        if (preg_match('/minPrice=(\d+)/', $url, $matches)) {
-            $minPrice = (int) $matches[1];
-        }
-        if (preg_match('/maxPrice=(\d+)/', $url, $matches)) {
-            $maxPrice = (int) $matches[1];
+        // Get strict, non-overlapping bands that fit within the user's range
+        $bands = $this->getUKPriceBands($minPrice, $maxPrice);
+        
+        $chunks = [];
+        foreach ($bands as $band) {
+            $chunks[] = [
+                'url' => $this->buildUrlWithPriceRange($baseUrl, $band['min'], $band['max']),
+                'min_price' => $band['min'],
+                'max_price' => $band['max'],
+                'estimated_count' => 500, // Estimate lower since bands are granular
+                'depth' => 1
+            ];
         }
         
-        return [$minPrice, $maxPrice];
+        Log::info("Created " . count($chunks) . " granular static chunks for range £{$minPrice}-£{$maxPrice}");
+        return $chunks;
     }
 
     /**
-     * Build URL with price range parameters
+     * Extract min and max price from a Rightmove URL
+     * Returns [min, max] or [null, null]
      */
-    protected function buildUrlWithPriceRange(string $baseUrl, int $minPrice, int $maxPrice): string
+    protected function extractPriceRangeFromUrl(string $url): array
     {
-        // Parse URL components
-        $parts = parse_url($baseUrl);
-        $queryParams = [];
-        if (isset($parts['query'])) {
-            parse_str($parts['query'], $queryParams);
+        $query = parse_url($url, PHP_URL_QUERY);
+        if (!$query) {
+            return [null, null];
         }
 
-        // Check if includeSSTC was in original params
-        $includeSSTC = isset($queryParams['includeSSTC']) ? $queryParams['includeSSTC'] : null;
-        if (!$includeSSTC && isset($queryParams['_includeSSTC'])) {
-             // Handle potential weird param naming
-             $includeSSTC = $queryParams['_includeSSTC']; 
-        }
-
-        // Remove parameters we want to override
-        unset($queryParams['minPrice']);
-        unset($queryParams['maxPrice']);
-        unset($queryParams['index']);
-        // Don't unset SSTC yet, we want to preserve it if we captured it
-        unset($queryParams['includeSSTC']);
-        unset($queryParams['_includeSSTC']);
+        parse_str($query, $params);
         
-        // Add our parameters
-        $queryParams['minPrice'] = $minPrice;
-        $queryParams['maxPrice'] = $maxPrice;
+        $min = isset($params['minPrice']) ? (int) $params['minPrice'] : null;
+        $max = isset($params['maxPrice']) ? (int) $params['maxPrice'] : null;
         
-        // Preserve original SSTC setting if present, otherwise default to false (standard Rightmove behavior)
-        if ($includeSSTC) {
-            $queryParams['includeSSTC'] = $includeSSTC;
-        }
-        $queryParams['sortType'] = $queryParams['sortType'] ?? '2'; // Sort by newest if not set
-
-        // Rebuild query string
-        $newQuery = http_build_query($queryParams);
-        
-        // Handle URL encoding - Rightmove requires certain characters to be unencoded
-        // %2C = comma, %5E = ^ (used in locationIdentifier like REGION^123)
-        $newQuery = str_replace(['%2C', '%5E'], [',', '^'], $newQuery);
-
-        $url = ($parts['scheme'] ?? 'https') . '://' . ($parts['host'] ?? 'www.rightmove.co.uk') . ($parts['path'] ?? '/property-for-sale/find.html') . '?' . $newQuery;
-
-        return $url;
+        return [$min, $max];
     }
 
+    /**
+     * Build URL with specific price range parameters
+     */
+    protected function buildUrlWithPriceRange(string $baseUrl, int $min, int $max): string
+    {
+        $parsed = parse_url($baseUrl);
+        $query = [];
+        
+        if (isset($parsed['query'])) {
+            parse_str($parsed['query'], $query);
+        }
+        
+        // Override/Set price params
+        $query['minPrice'] = $min;
+        $query['maxPrice'] = $max;
+        
+        // Rebuild query string
+        $queryString = http_build_query($query);
+        
+        // Reconstruct URL
+        $scheme = isset($parsed['scheme']) ? $parsed['scheme'] . '://' : '';
+        $host = $parsed['host'] ?? '';
+        $path = $parsed['path'] ?? '';
+        
+        // CRITICAL: Rightmove requires literal ^ and , in URLs (not encoded)
+        $queryString = str_replace(['%2C', '%5E', '%5e'], [',', '^', '^'], $queryString);
+        
+        return $scheme . $host . $path . '?' . $queryString;
+    }
+    
     /**
      * Get predefined UK property price bands
      * Uses Rightmove's exact thresholds with NON-OVERLAPPING ranges
@@ -468,13 +542,17 @@ class MasterImportJob implements ShouldQueue
      */
     protected function getUKPriceBands(int $minPrice, int $maxPrice): array
     {
-        // Rightmove's ACTUAL supported price thresholds
-        // We use these exact values but offset minPrice by 1 to avoid boundary duplicates
-        // e.g. Band 1: 0-100000, Band 2: 100001-150000 (not 100000-150000)
+        // REFINED THRESHOLDS: Optimized steps (25k/50k) to balance chunk size and count.
+        // Prevents generating 100+ small chunks which might flag bot detection.
         $thresholds = [
-            0, 50000, 100000, 150000, 200000, 250000, 300000, 350000, 400000, 
-            450000, 500000, 600000, 700000, 800000, 900000, 1000000, 
-            1250000, 1500000, 2000000, 2500000, 3000000, 5000000, 10000000, 15000000
+            0, 50000, 
+            75000, 100000, // 25k steps
+            125000, 150000, 175000, 200000, 225000, 250000, // 25k steps
+            300000, 350000, 400000, 450000, 500000, // 50k steps
+            600000, 700000, 800000, 900000, 1000000, // 100k steps
+            1250000, 1500000, 1750000, 2000000,
+            2500000, 3000000, 4000000, 5000000,
+            10000000, 20000000, 50000000
         ];
         
         $bands = [];
@@ -483,21 +561,27 @@ class MasterImportJob implements ShouldQueue
             $bandMin = ($i === 0) ? $thresholds[$i] : $thresholds[$i] + 1;
             $bandMax = $thresholds[$i + 1];
             
-            // Only include bands that overlap with the user's range
-            if ($bandMax > $minPrice && $bandMin < $maxPrice) {
-                $bands[] = [
-                    'min' => max($bandMin, $minPrice),
-                    'max' => min($bandMax, $maxPrice)
-                ];
+            // Strictly check overlap with user's requested range
+            // Band must start BEFORE user's max, and end AFTER user's min
+            if ($bandMin <= $maxPrice && $bandMax >= $minPrice) {
+                // Clip the band to match the user's bounds exactly
+                $actualMin = max($bandMin, $minPrice);
+                $actualMax = min($bandMax, $maxPrice);
+                
+                // Ensure valid range
+                if ($actualMin <= $actualMax) {
+                    $bands[] = [
+                        'min' => $actualMin,
+                        'max' => $actualMax
+                    ];
+                }
             }
         }
         
-        // If no bands match (shouldn't happen), use the full range
+        // Fallback: if no bands found (e.g. range is tiny and fits within one threshold gap), add strictly
         if (empty($bands)) {
-            $bands = [['min' => $minPrice, 'max' => $maxPrice]];
+             $bands[] = ['min' => $minPrice, 'max' => $maxPrice];
         }
-        
-        Log::info("Generated " . count($bands) . " NON-OVERLAPPING price bands from £" . number_format($minPrice) . " to £" . number_format($maxPrice));
         
         return $bands;
     }

@@ -67,12 +67,16 @@ class ImportSession extends Model
      */
     public function incrementCompleted(int $propertiesImported = 0, int $propertiesSkipped = 0): self
     {
-        $this->increment('completed_jobs');
+        // Safe update handling NULL values
+        $completed = $this->completed_jobs ?? 0;
+        $imported = $this->imported_properties ?? 0;
+        $skipped = $this->skipped_properties ?? 0;
         
-        // Note: imported_properties is now primarily for legacy/caching.
-        // The UI will use the actual count from the properties table for accuracy.
-        $this->increment('imported_properties', $propertiesImported);
-        $this->increment('skipped_properties', $propertiesSkipped);
+        $this->update([
+            'completed_jobs' => $completed + 1,
+            'imported_properties' => $imported + $propertiesImported,
+            'skipped_properties' => $skipped + $propertiesSkipped
+        ]);
         
         // Check if all jobs are done
         $this->refresh();
@@ -173,7 +177,9 @@ class ImportSession extends Model
      */
     public function addJobs(int $count): self
     {
-        $this->increment('total_jobs', $count);
+        // Safe update handling NULL values
+        $current = $this->total_jobs ?? 0;
+        $this->update(['total_jobs' => $current + $count]);
         return $this;
     }
 

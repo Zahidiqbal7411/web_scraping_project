@@ -196,9 +196,8 @@ class ScheduleController extends Controller
             // Auto-start queue worker if not running
             $this->startQueueWorkerIfNeeded();
 
-            // Dispatch the MasterImportJob in 'urls_only' mode
-            MasterImportJob::dispatch($importSession, $schedule->url, $schedule->saved_search_id, 'full')
-                ->onQueue('imports');
+            // Run MasterImportJob synchronously for reliability
+            MasterImportJob::dispatchSync($importSession, $schedule->url, $schedule->saved_search_id, 'full');
 
             return response()->json([
                 'success' => true,
@@ -219,6 +218,25 @@ class ScheduleController extends Controller
     {
         $schedules = Schedule::orderBy('created_at', 'desc')->get()->map(function ($schedule) {
             $session = $schedule->importSession;
+            // Start checking for completion
+            $details = $session ? ($session->split_details ?? []) : [];
+            $pendingChunks = $details['pending_chunks'] ?? [];
+            $hasPendingChunks = count($pendingChunks) > 0;
+
+            // Check if session is actually finished
+            // CRITICAL: total_jobs MUST be > 0
+            // AND there must be NO pending chunks left
+            $isSessionFinished = $session && 
+                $session->total_jobs > 0 && 
+                ($session->completed_jobs + $session->failed_jobs >= $session->total_jobs) &&
+                !$hasPendingChunks; // Safety check: verify Queue is empty
+            
+            // If session is finished, update schedule status to completed
+            if ($isSessionFinished && $schedule->status === Schedule::STATUS_IMPORTING) {
+                $schedule->update(['status' => Schedule::STATUS_COMPLETED, 'property_import_completed' => true]);
+                $session->markCompleted(); // Ensure session is also marked completed
+            }
+
             $progress = $session ? $session->getProgressPercentage() : $schedule->getProgressPercentage();
             
             return [
@@ -256,7 +274,12 @@ class ScheduleController extends Controller
     public function processChunk()
     {
         // Prevent timeout during heavy processing
-        set_time_limit(120);
+        // Allow up to 1 hour for large synchronous imports
+        set_time_limit(3600);
+        
+        // Ensure script continues running even if browser/client disconnects
+        // This is CRITICAL for the synchronous import strategy
+        ignore_user_abort(true);
         
         Log::emergency("=== DEBUG: processChunk called at " . now()->toDateTimeString() . " ===");
         try {
@@ -265,6 +288,7 @@ class ScheduleController extends Controller
                 ->orderBy('id', 'asc')
                 ->first();
             
+            // If no active import, check for pending
             if (!$schedule) {
                 $schedule = Schedule::where('status', Schedule::STATUS_PENDING)
                     ->orderBy('id', 'asc')
@@ -278,14 +302,15 @@ class ScheduleController extends Controller
                     ]);
                 }
                 
-                // Start this schedule via Queue
-                Log::info("Schedule #{$schedule->id}: Triggering queued import for {$schedule->name}");
+                // Start this schedule
+                Log::info("Starting schedule #{$schedule->id}: {$schedule->name}");
                 
                 $importSession = ImportSession::create([
                     'saved_search_id' => $schedule->saved_search_id,
                     'base_url' => $schedule->url,
                     'status' => ImportSession::STATUS_PENDING,
-                    'mode' => 'full', // Use full mode to save property details to database
+                    'mode' => 'full',
+                    'total_jobs' => 0, // Explicitly init to 0 so increment works works reliably
                 ]);
 
                 $schedule->update([
@@ -293,151 +318,121 @@ class ScheduleController extends Controller
                     'import_session_id' => $importSession->id,
                     'started_at' => now(),
                 ]);
-
-                // Auto-start queue worker if not running
-                $this->startQueueWorkerIfNeeded();
-
-                try {
-                    Log::info("DISPATCH DEBUG: About to dispatch MasterImportJob for session {$importSession->id}");
-                    MasterImportJob::dispatch($importSession, $schedule->url, $schedule->saved_search_id, 'full')
-                        ->onQueue('imports');
-                    Log::info("DISPATCH DEBUG: Successfully dispatched MasterImportJob for session {$importSession->id}");
-                } catch (\Throwable $e) {
-                    Log::error("DISPATCH ERROR: Failed to dispatch MasterImportJob: " . $e->getMessage());
-                    Log::error($e->getTraceAsString());
-                    // Don't crash here, just log it. The next poll might succeed or the user can retry.
-                }
-
-                return response()->json([
-                    'success' => true,
-                    'done' => false,
-                    'schedule_name' => $schedule->name,
-                    'progress_percentage' => 0,
-                    'message' => "Started queued import for {$schedule->name}"
-                ]);
             }
 
-            // If already importing, just return progress
-            $session = $schedule->importSession;
-
-            // If no worker is running, try to start one (non-blocking)
-            if ($session && !$this->isQueueWorkerRunning()) {
-                Log::info("No queue worker detected for session {$session->id}. Starting worker in background.");
-                $this->startQueueWorkerIfNeeded();
-                // Refresh session to get latest status
-                $session->refresh();
+            // Get the session (either just created or existing)
+            $importSession = $schedule->importSession;
+            if (!$importSession) {
+                 // Should not happen, but safe fallback
+                 $schedule->update(['status' => Schedule::STATUS_FAILED]);
+                 return response()->json(['success' => false, 'message' => 'Missing session']);
             }
 
-            // AUTO-RECOVERY: Detect Zombie Session (Schedule is IMPORTING, but Session is still PENDING)
-            // This happens if the previous request timed out before dispatching the job
-            if ($session && $session->status === ImportSession::STATUS_PENDING && $session->created_at->diffInMinutes(now()) >= 1) {
-                Log::warning("Detected Zombie Session {$session->id} (Pending for >1m). Re-dispatching MasterImportJob.");
+            // ============================================================
+            // CORE IMPORT LOOP: PLAN OR EXECUTE CHUNK
+            // ============================================================
+            try {
+                // STEP 1: PLANNING PHASE
+                // If no jobs have been planned yet, run the MasterImportJob to generate the plan
+                // Use empty() to catch both 0 and NULL (if DB default is null)
+                Log::info("ProcessChunk Check: Session {$importSession->id} Total Jobs: " . ($importSession->total_jobs ?? 'NULL'));
                 
-                // CRITICAL FIX: Reset job counts to prevent cumulative inflation on re-dispatch
-                $session->update(['total_jobs' => 0, 'completed_jobs' => 0, 'failed_jobs' => 0]);
-                
-                $this->startQueueWorkerIfNeeded();
-                
-                MasterImportJob::dispatch($session, $schedule->url, $schedule->saved_search_id, 'full')
-                    ->onQueue('imports');
+                if (empty($importSession->total_jobs)) {
+                    Log::info("DISPATCH DEBUG: Planning import for session {$importSession->id}...");
                     
-                return response()->json([
-                    'success' => true,
-                    'done' => false,
-                    'schedule_id' => $schedule->id,
-                    'schedule_name' => $schedule->name,
-                    'progress_percentage' => 0,
-                    'message' => "Recovering stuck import process..."
-                ]);
-            }
-
-            // FALLBACK: Detect stuck URL phase and trigger fetch details directly
-            // This handles the case where URL chunks completed but FetchDetailsFromUrlsJob never ran
-            if ($session && $session->mode === 'urls_only' && $session->total_jobs > 0) {
-                if ($session->completed_jobs >= $session->total_jobs) {
-                    Log::info("Detected completed URLs phase stuck at {$session->completed_jobs}/{$session->total_jobs}. Triggering fetch details phase.");
+                    try {
+                        // Run Planner Synchronously
+                        MasterImportJob::dispatchSync($importSession, $schedule->url, $schedule->saved_search_id, 'full');
+                        Log::info("DISPATCH DEBUG: MasterImportJob finished execution.");
+                    } catch (\Exception $e) {
+                         Log::error("DISPATCH DEBUG: MasterImportJob CRASHED: " . $e->getMessage());
+                    }
                     
-                    $schedule->markUrlImportComplete();
-                    $schedule->update(['status' => Schedule::STATUS_IMPORTING]);
+                    // Refresh session to get the planned jobs
+                    $importSession->refresh();
+                    Log::info("DISPATCH DEBUG: After dispatch, Total Jobs: " . $importSession->total_jobs);
                     
-                    $session->update(['mode' => 'fetch_details', 'completed_jobs' => 0, 'total_jobs' => 1]);
+                    if (empty($importSession->total_jobs)) {
+                         // Safefuard: If planning returned 0 jobs (empty search or error), mark complete
+                         // But if it's 0 because of error, we get stuck loop.
+                         // Let's Log warning.
+                         Log::warning("DISPATCH DEBUG: Total Jobs is STILL 0 after planner. Assuming failure or empty.");
+                         
+                         $importSession->markCompleted();
+                         $schedule->update(['status' => Schedule::STATUS_COMPLETED]);
+                         return response()->json([
+                             'success' => true, 
+                             'done' => true, 
+                             'message' => 'Completed (No properties found during planning)'
+                         ]);
+                    }
                     
-                    \App\Jobs\FetchDetailsFromUrlsJob::dispatch($session, $schedule->saved_search_id)
-                        ->onQueue('imports');
-                    
-                    // Try to start worker again to process the dispatched job
-                    $this->startQueueWorkerIfNeeded();
-                    
+                    // Initial planning success
                     return response()->json([
                         'success' => true,
                         'done' => false,
-                        'schedule_id' => $schedule->id,
                         'schedule_name' => $schedule->name,
                         'progress_percentage' => 0,
-                        'message' => "Starting property details fetch..."
+                        'message' => "Planning queued. {$importSession->total_jobs} chunks generated."
                     ]);
                 }
-            }
-
-            $progress = $session ? $session->getProgressPercentage() : $schedule->getProgressPercentage();
-            
-            // Check if session is actually finished
-            $isSessionFinished = $session && ($session->completed_jobs + $session->failed_jobs >= $session->total_jobs) && $session->total_jobs > 0;
-            
-            if ($schedule->status === Schedule::STATUS_COMPLETED || $isSessionFinished || $progress >= 100) {
-                // Ensure status is up to date
-                if ($schedule->status !== Schedule::STATUS_COMPLETED) {
-                    $schedule->update([
-                        'status' => Schedule::STATUS_COMPLETED,
-                        'completed_at' => now(),
-                        'property_import_completed' => true
+                
+                // STEP 2: MONITOR PROGRESS (QUEUE MODE)
+                // The MasterImportJob has already dispatched all chunks to the Queue.
+                // We just need to monitor the ImportSession progress here.
+                
+                $total = $importSession->total_jobs;
+                $completed = $importSession->completed_jobs;
+                $failed = $importSession->failed_jobs;
+                $processed = $completed + $failed;
+                
+                $percent = $total > 0 ? round(($processed / $total) * 100, 1) : 0;
+                
+                // Monitor Queue Size
+                $queueSize = \Illuminate\Support\Facades\DB::table('jobs')->count();
+                Log::info("POLLING: Session {$importSession->id} - Progress: {$percent}% ({$processed}/{$total}). Queue Size: {$queueSize}");
+                
+                if ($processed < $total) {
+                    return response()->json([
+                        'success' => true,
+                        'done' => false,
+                        'schedule_name' => $schedule->name,
+                        'progress_percentage' => $percent,
+                        'message' => "Processing in background... {$processed}/{$total} chunks done" . ($queueSize > 0 ? " (queue: {$queueSize})" : ""),
+                        'debug_queue_size' => $queueSize
                     ]);
-                    Log::info("Marked schedule #{$schedule->id} ({$schedule->name}) as COMPLETED");
+                } else {
+                    // All jobs finished
+                    $importSession->markCompleted();
+                    $schedule->update(['status' => Schedule::STATUS_COMPLETED, 'property_import_completed' => true]);
+                    
+                    return response()->json([
+                        'success' => true,
+                        'done' => true,
+                        'schedule_name' => $schedule->name,
+                        'progress_percentage' => 100,
+                        'message' => "Import completed successfully."
+                    ]);
                 }
 
-                // Check if there are more pending schedules
-                $nextPending = Schedule::where('status', Schedule::STATUS_PENDING)->count();
-                Log::info("Schedule #{$schedule->id} finished. Remaining pending schedules: {$nextPending}");
-
+            } catch (\Throwable $e) {
+                Log::error("DISPATCH ERROR: Import failed: " . $e->getMessage());
+                Log::error($e->getTraceAsString());
+                
+                // Don't fail immediately on transient errors, but for now safe to fail
+                $importSession->markFailed("Error: " . $e->getMessage());
+                
                 return response()->json([
-                    'success' => true,
-                    'done' => false, // Keep polling to pick up the next schedule!
-                    'schedule_completed' => true,
-                    'schedule_id' => $schedule->id,
-                    'schedule_name' => $schedule->name,
-                    'imported_count' => $schedule->imported_count,
-                    'message' => "Completed: {$schedule->name}"
-                ]);
-            }
-
-            $progress = $session ? $session->getProgressPercentage() : $schedule->getProgressPercentage();
-            // Show the accurate total - use max of completed and total in case more jobs were added dynamically
-            $displayTotal = $session ? max($session->completed_jobs, $session->total_jobs) : 0;
-            $message = $session ? "Queued processing... ({$session->completed_jobs}/{$displayTotal} chunks)" : "Processing {$schedule->name}...";
-
-            // DETECT FAILED SESSION: If session is failed but schedule is import, fail the schedule
-            if ($session && $session->status === ImportSession::STATUS_FAILED) {
-                 $schedule->markAsFailed($session->error_message ?? 'Import session failed');
-                 return response()->json([
                     'success' => false,
-                    'done' => true,
-                    'error' => 'Import failed: ' . ($session->error_message ?? 'Unknown error'),
-                    'message' => 'Import failed. Please check logs.'
-                ]);
+                    'message' => "Import error: " . $e->getMessage()
+                ], 500);
             }
-
-            // If master job is still pending or initializing
-            if ($session && $session->total_jobs === 0) {
-                $message = "Initializing import patterns and price splitting...";
-            }
-
+            
+            // Legacy code removed - "Plan & Execute" logic handles everything now.
             return response()->json([
-                'success' => true,
-                'done' => false,
-                'schedule_id' => $schedule->id,
-                'schedule_name' => $schedule->name,
-                'progress_percentage' => $progress,
-                'message' => $message
+                'success' => true, 
+                'done' => true, 
+                'message' => 'No actions pending'
             ]);
 
         } catch (\Throwable $e) {
@@ -716,5 +711,133 @@ class ScheduleController extends Controller
         $disabled = explode(',', ini_get('disable_functions'));
         $disabled = array_map('trim', $disabled);
         return !in_array($functionName, $disabled);
+    }
+
+    /**
+     * Test scraping directly without jobs - for diagnosing import issues
+     * Access via: /schedules/test-scrape?url=YOUR_RIGHTMOVE_URL
+     */
+    public function testScrape(Request $request)
+    {
+        $url = $request->input('url');
+        
+        if (!$url) {
+            // Use a default Manchester URL for testing
+            $url = 'https://www.rightmove.co.uk/property-for-sale/find.html?locationIdentifier=REGION^87490&sortType=2';
+        }
+        
+        // Decode URL-encoded characters (especially ^ which is %5E)
+        $url = urldecode($url);
+        
+        $result = [
+            'test_url' => $url,
+            'timestamp' => now()->toDateTimeString(),
+        ];
+        
+        try {
+            // Step 1: Test probeResultCount
+            Log::info("=== TEST SCRAPE: Starting diagnostic for URL: {$url} ===");
+            
+            $startTime = microtime(true);
+            $probeCount = $this->scraperService->probeResultCount($url);
+            $probeTime = round(microtime(true) - $startTime, 2);
+            
+            $result['probe'] = [
+                'count' => $probeCount,
+                'time_seconds' => $probeTime,
+            ];
+            
+            // Step 2: Test fetchWithRetry to get raw HTML
+            $startTime = microtime(true);
+            $html = $this->scraperService->fetchWithRetry($url);
+            $fetchTime = round(microtime(true) - $startTime, 2);
+            
+            $htmlLen = strlen($html);
+            $hasPageModel = strpos($html, 'PAGE_MODEL') !== false;
+            
+            // Check for blocking
+            $blockingIndicators = [];
+            if (stripos($html, 'captcha') !== false) $blockingIndicators[] = 'captcha';
+            if (stripos($html, 'challenge') !== false) $blockingIndicators[] = 'challenge';
+            if (stripos($html, 'cloudflare') !== false) $blockingIndicators[] = 'cloudflare';
+            if (stripos($html, 'blocked') !== false) $blockingIndicators[] = 'blocked';
+            if (stripos($html, 'rate limit') !== false) $blockingIndicators[] = 'rate_limit';
+            
+            $result['fetch'] = [
+                'html_size_bytes' => $htmlLen,
+                'time_seconds' => $fetchTime,
+                'has_page_model' => $hasPageModel,
+                'is_blocked' => !empty($blockingIndicators),
+                'blocking_indicators' => $blockingIndicators,
+            ];
+            
+            // If HTML is small, include sample
+            if ($htmlLen < 5000) {
+                $result['fetch']['html_sample'] = substr($html, 0, 2000);
+            }
+            
+            // Step 3: Test scrapePropertyUrls (just page 0)
+            $startTime = microtime(true);
+            $urls = $this->scraperService->scrapePropertyUrls($url, 0, 0);
+            $scrapeTime = round(microtime(true) - $startTime, 2);
+            
+            $result['scrape'] = [
+                'properties_found' => count($urls),
+                'time_seconds' => $scrapeTime,
+                'sample_properties' => array_slice($urls, 0, 5), // First 5 properties
+            ];
+            
+            // Parse PAGE_MODEL if available
+            if ($hasPageModel) {
+                $json = $this->scraperService->parseJsonData($html);
+                if ($json) {
+                    $result['page_model'] = [
+                        'top_level_keys' => array_keys($json),
+                        'has_properties' => isset($json['properties']),
+                        'has_pagination' => isset($json['pagination']),
+                        'result_count' => $json['resultCount'] ?? $json['pagination']['total'] ?? null,
+                    ];
+                    
+                    // Check all possible property paths
+                    $paths = [
+                        'properties' => isset($json['properties']) ? count($json['properties']) : 0,
+                        'searchResult.properties' => isset($json['searchResult']['properties']) ? count($json['searchResult']['properties']) : 0,
+                        'propertySearch.properties' => isset($json['propertySearch']['properties']) ? count($json['propertySearch']['properties']) : 0,
+                    ];
+                    $result['page_model']['property_paths'] = $paths;
+                }
+            }
+            
+            // Overall diagnosis
+            if ($probeCount > 0 && count($urls) > 0) {
+                $result['diagnosis'] = 'SUCCESS - Scraping is working correctly';
+                $result['status'] = 'ok';
+            } elseif ($probeCount === 0 && $htmlLen < 5000) {
+                $result['diagnosis'] = 'BLOCKED - Rightmove is likely blocking requests (small response, no PAGE_MODEL)';
+                $result['status'] = 'blocked';
+            } elseif ($probeCount === 0 && !$hasPageModel) {
+                $result['diagnosis'] = 'BLOCKED - No PAGE_MODEL in response. Getting error page or CAPTCHA';
+                $result['status'] = 'blocked';
+            } elseif ($probeCount === 0 && $hasPageModel) {
+                $result['diagnosis'] = 'PARSE ERROR - PAGE_MODEL exists but count extraction failed';
+                $result['status'] = 'parse_error';
+            } elseif ($probeCount > 0 && count($urls) === 0) {
+                $result['diagnosis'] = 'SCRAPE ERROR - Probe found properties but URL scraping returned 0';
+                $result['status'] = 'scrape_error';
+            } else {
+                $result['diagnosis'] = 'UNKNOWN - Unexpected state';
+                $result['status'] = 'unknown';
+            }
+            
+            Log::info("=== TEST SCRAPE COMPLETE ===", $result);
+            
+        } catch (\Exception $e) {
+            $result['error'] = $e->getMessage();
+            $result['trace'] = $e->getTraceAsString();
+            $result['diagnosis'] = 'EXCEPTION - ' . $e->getMessage();
+            $result['status'] = 'error';
+        }
+        
+        return response()->json($result, 200, [], JSON_PRETTY_PRINT);
     }
 }
