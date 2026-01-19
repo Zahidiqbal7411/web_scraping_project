@@ -402,16 +402,38 @@ class ScheduleController extends Controller
                         'debug_queue_size' => $queueSize
                     ]);
                 } else {
-                    // All jobs finished
+                    // All jobs finished for THIS schedule
                     $importSession->markCompleted();
                     $schedule->update(['status' => Schedule::STATUS_COMPLETED, 'property_import_completed' => true]);
+                    
+                    Log::info("Schedule #{$schedule->id} ({$schedule->name}) completed successfully.");
+                    
+                    // CHECK FOR MORE PENDING SCHEDULES
+                    // If there are more pending schedules, return done: false so polling continues
+                    // This enables automatic sequential processing of all schedules
+                    $pendingCount = Schedule::where('status', Schedule::STATUS_PENDING)->count();
+                    
+                    if ($pendingCount > 0) {
+                        Log::info("Found {$pendingCount} more pending schedules. Continuing sequential processing...");
+                        
+                        return response()->json([
+                            'success' => true,
+                            'done' => false, // Keep polling to auto-start next schedule
+                            'schedule_name' => $schedule->name,
+                            'progress_percentage' => 100,
+                            'message' => "Completed '{$schedule->name}'. Starting next schedule... ({$pendingCount} remaining)"
+                        ]);
+                    }
+                    
+                    // No more pending schedules - all done!
+                    Log::info("All schedules completed. No more pending schedules.");
                     
                     return response()->json([
                         'success' => true,
                         'done' => true,
                         'schedule_name' => $schedule->name,
                         'progress_percentage' => 100,
-                        'message' => "Import completed successfully."
+                        'message' => "All imports completed successfully!"
                     ]);
                 }
 

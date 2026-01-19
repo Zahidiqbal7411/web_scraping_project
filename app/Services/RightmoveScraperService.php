@@ -196,6 +196,14 @@ class RightmoveScraperService
             $hasPageModel = strpos($html, 'PAGE_MODEL') !== false;
             Log::info("PROBE: PAGE_MODEL present: " . ($hasPageModel ? 'YES' : 'NO'));
 
+            // CRITICAL FIX: If blocking is detected AND no PAGE_MODEL, return 0 immediately
+            // This triggers the 50,000 property fallback in MasterImportJob for large imports
+            // Without this, fallback regex may match random numbers from blocked HTML (e.g., 114)
+            if ($isBlocked && !$hasPageModel) {
+                Log::warning("PROBE: Blocking detected with no PAGE_MODEL - returning 0 to trigger large import strategy");
+                return 0;
+            }
+
             // Try to extract total from PAGE_MODEL JSON
             if (preg_match('/window\.PAGE_MODEL\s*=\s*(\{.*?\});/s', $html, $matches)) {
                 $json = json_decode($matches[1], true);

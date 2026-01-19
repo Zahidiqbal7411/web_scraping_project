@@ -54,8 +54,8 @@ class MasterImportJob implements ShouldQueue
         $this->savedSearchId = $savedSearchId;
         $this->mode = $mode;
         
-        // Run on a high priority queue to ensure orchestration starts immediately
-        $this->onQueue('high');
+        // Run on the imports queue to match server queue worker
+        $this->onQueue('imports');
     }
 
     /**
@@ -121,6 +121,7 @@ class MasterImportJob implements ShouldQueue
             
             // PRICE PARTITIONING STRATEGY (For >1000 results)
             $totalDispatched = 0; // Track total jobs dispatched across all paths
+            $pendingChunks = []; // CRITICAL: Initialize the array to store planned chunks
             
             if ($actualTotalCount > 1000) {
                 Log::info("=== MASTER: Large search detected (>1000). Property count: {$actualTotalCount} ===");
@@ -542,17 +543,31 @@ class MasterImportJob implements ShouldQueue
      */
     protected function getUKPriceBands(int $minPrice, int $maxPrice): array
     {
-        // REFINED THRESHOLDS: Optimized steps (25k/50k) to balance chunk size and count.
-        // Prevents generating 100+ small chunks which might flag bot detection.
+        // GRANULAR THRESHOLDS: Fine-grained steps (10k-15k) in dense price ranges (£100k-£600k)
+        // to capture 54,000+ properties for large cities like London.
+        // Each band captures up to 1,000 properties (Rightmove limit).
+        // ~80 bands × 1,000 = ~80,000 max properties.
         $thresholds = [
-            0, 50000, 
-            75000, 100000, // 25k steps
-            125000, 150000, 175000, 200000, 225000, 250000, // 25k steps
-            300000, 350000, 400000, 450000, 500000, // 50k steps
-            600000, 700000, 800000, 900000, 1000000, // 100k steps
-            1250000, 1500000, 1750000, 2000000,
-            2500000, 3000000, 4000000, 5000000,
-            10000000, 20000000, 50000000
+            0, 50000, 75000, 100000,
+            // Dense range: £100k-£300k (10k steps - most affordable London properties)
+            110000, 120000, 130000, 140000, 150000,
+            160000, 170000, 180000, 190000, 200000,
+            210000, 220000, 230000, 240000, 250000,
+            260000, 270000, 280000, 290000, 300000,
+            // Dense range: £300k-£500k (15k steps - mid-range London properties)
+            315000, 330000, 345000, 360000, 375000, 390000,
+            405000, 420000, 435000, 450000, 465000, 480000, 500000,
+            // Dense range: £500k-£800k (20k steps)
+            520000, 540000, 560000, 580000, 600000,
+            625000, 650000, 675000, 700000, 725000, 750000, 775000, 800000,
+            // Higher prices: £800k-£2M (50k-100k steps)
+            850000, 900000, 950000, 1000000,
+            1100000, 1200000, 1300000, 1400000, 1500000,
+            1600000, 1700000, 1800000, 1900000, 2000000,
+            // Luxury: £2M+ (larger steps)
+            2250000, 2500000, 2750000, 3000000,
+            3500000, 4000000, 5000000, 6000000, 7500000,
+            10000000, 15000000, 20000000, 50000000
         ];
         
         $bands = [];

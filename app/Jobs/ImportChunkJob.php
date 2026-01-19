@@ -84,8 +84,8 @@ class ImportChunkJob implements ShouldQueue
         $this->savedSearchId = $savedSearchId;
         $this->mode = $mode;
         
-        // Removed custom queue to ensure default worker picks it up
-        // $this->onQueue('imports');
+        // Use the imports queue to match server queue worker
+        $this->onQueue('imports');
     }
 
 
@@ -235,8 +235,8 @@ class ImportChunkJob implements ShouldQueue
                 // Step 5: Automatically trigger sold data import for these properties
                 foreach ($results['properties'] ?? [] as $property) {
                     if (!empty($property['sold_link'])) {
-                        Log::info("Dispatching ImportSoldJob SYNCHRONOUSLY for property {$property['id']}");
-                        ImportSoldJob::dispatchSync($property['id']);
+                        Log::info("Dispatching ImportSoldJob ASYNCHRONOUSLY for property {$property['id']}");
+                        ImportSoldJob::dispatch($property['id']);
                     }
                 }
             }
